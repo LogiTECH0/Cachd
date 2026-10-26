@@ -8,8 +8,7 @@ public sealed class PredictionTests
 {
     private readonly INextPagePredictor _predictor = new MostFrequentPredictor();
 
-    private static NavigationEvent Event(string url) =>
-        new(url, DateTimeOffset.UnixEpoch, null);
+    private static NavigationEvent Event(string url) => new(url, DateTimeOffset.UnixEpoch, null);
 
     [Fact]
     public void Predict_RanksPagesByVisitCount()
@@ -21,7 +20,7 @@ public sealed class PredictionTests
             Event("B"),
             Event("C"),
             Event("B"),
-            Event("C")
+            Event("C"),
         ];
 
         var result = _predictor.Predict(history, "D", 3);
@@ -38,14 +37,7 @@ public sealed class PredictionTests
     [Fact]
     public void Predict_ExcludesCurrentUrl()
     {
-        NavigationEvent[] history =
-        [
-            Event("A"),
-            Event("A"),
-            Event("B"),
-            Event("B"),
-            Event("B")
-        ];
+        NavigationEvent[] history = [Event("A"), Event("A"), Event("B"), Event("B"), Event("B")];
 
         var result = _predictor.Predict(history, "A", 10);
 
@@ -64,7 +56,7 @@ public sealed class PredictionTests
             Event("B"),
             Event("C"),
             Event("C"),
-            Event("C")
+            Event("C"),
         ];
 
         var result = _predictor.Predict(history, "D", 2);
@@ -77,10 +69,7 @@ public sealed class PredictionTests
     [Fact]
     public void Predict_ReturnsEmptyForEmptyHistory()
     {
-        var result = _predictor.Predict(
-            Array.Empty<NavigationEvent>(),
-            "A",
-            5);
+        var result = _predictor.Predict(Array.Empty<NavigationEvent>(), "A", 5);
 
         Assert.Empty(result);
     }
@@ -91,11 +80,7 @@ public sealed class PredictionTests
     [InlineData(-10)]
     public void Predict_ReturnsEmptyForNonPositiveLimit(int maxResults)
     {
-        NavigationEvent[] history =
-        [
-            Event("A"),
-            Event("B")
-        ];
+        NavigationEvent[] history = [Event("A"), Event("B")];
 
         var result = _predictor.Predict(history, "C", maxResults);
 
@@ -105,14 +90,7 @@ public sealed class PredictionTests
     [Fact]
     public void Predict_ReturnsEachUrlOnlyOnce()
     {
-        NavigationEvent[] history =
-        [
-            Event("A"),
-            Event("B"),
-            Event("A"),
-            Event("B"),
-            Event("A")
-        ];
+        NavigationEvent[] history = [Event("A"), Event("B"), Event("A"), Event("B"), Event("A")];
 
         var result = _predictor.Predict(history, "C", 10);
 
@@ -123,15 +101,87 @@ public sealed class PredictionTests
     [Fact]
     public void Predict_HandlesEqualScores()
     {
-        NavigationEvent[] history =
-        [
-            Event("A"),
-            Event("B")
-        ];
+        NavigationEvent[] history = [Event("A"), Event("B")];
 
         var result = _predictor.Predict(history, "C", 2);
 
         Assert.Equal(2, result.Count);
         Assert.All(result, prediction => Assert.Equal(1, prediction.Score));
+    }
+
+    [Fact]
+    public void TransitionPredictor_RanksTransitionsByFrequency()
+    {
+        var predictor = new TransitionPredictor();
+
+        NavigationEvent[] history =
+        [
+            new("B", DateTimeOffset.UnixEpoch, "A"),
+            new("C", DateTimeOffset.UnixEpoch, "B"),
+            new("B", DateTimeOffset.UnixEpoch, "A"),
+            new("D", DateTimeOffset.UnixEpoch, "B"),
+            new("B", DateTimeOffset.UnixEpoch, "A"),
+            new("C", DateTimeOffset.UnixEpoch, "B"),
+        ];
+
+        var result = predictor.Predict(history, "B", 3);
+
+        Assert.Equal(2, result.Count);
+
+        Assert.Equal("C", result[0].Url);
+        Assert.Equal(2, result[0].Score);
+
+        Assert.Equal("D", result[1].Url);
+        Assert.Equal(1, result[1].Score);
+    }
+
+    [Fact]
+    public void TransitionPredictor_IgnoresTransitionsFromOtherPages()
+    {
+        var predictor = new TransitionPredictor();
+
+        NavigationEvent[] history =
+        [
+            new("C", DateTimeOffset.UnixEpoch, "A"),
+            new("C", DateTimeOffset.UnixEpoch, "A"),
+            new("D", DateTimeOffset.UnixEpoch, "B"),
+        ];
+
+        var result = predictor.Predict(history, "B", 5);
+
+        var prediction = Assert.Single(result);
+
+        Assert.Equal("D", prediction.Url);
+        Assert.Equal(1, prediction.Score);
+    }
+
+    [Fact]
+    public void TransitionPredictor_ReturnsEmptyWhenNoTransitionsExist()
+    {
+        var predictor = new TransitionPredictor();
+
+        NavigationEvent[] history =
+        [
+            new("A", DateTimeOffset.UnixEpoch, "B"),
+            new("C", DateTimeOffset.UnixEpoch, "D"),
+        ];
+
+        var result = predictor.Predict(history, "X", 5);
+
+        Assert.Empty(result);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void TransitionPredictor_ReturnsEmptyForNonPositiveLimit(int maxResults)
+    {
+        var predictor = new TransitionPredictor();
+
+        NavigationEvent[] history = [new("C", DateTimeOffset.UnixEpoch, "B")];
+
+        var result = predictor.Predict(history, "B", maxResults);
+
+        Assert.Empty(result);
     }
 }
