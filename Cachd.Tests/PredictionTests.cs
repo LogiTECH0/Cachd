@@ -184,4 +184,42 @@ public sealed class PredictionTests
 
         Assert.Empty(result);
     }
+
+    [Fact]
+    public void HitAtKEvaluator_CalculatesHitRateCorrectly()
+    {
+        var predictor = new TransitionPredictor();
+        var evaluator = new HitAtKEvaluator();
+
+        NavigationEvent[] history =
+        [
+            new("A", DateTimeOffset.UnixEpoch, null),
+            new("B", DateTimeOffset.UnixEpoch, "A"),
+            new("C", DateTimeOffset.UnixEpoch, "B"),
+            new("B", DateTimeOffset.UnixEpoch, "A"),
+            new("C", DateTimeOffset.UnixEpoch, "B"),
+            new("D", DateTimeOffset.UnixEpoch, "B"),
+        ];
+
+        var result = evaluator.Evaluate(predictor, history, 1);
+
+        Assert.Equal(5, result.EvaluatedCases);
+        Assert.Equal(2, result.Hits);
+        Assert.Equal(0.4, result.HitRate, 10);
+    }
+
+    [Fact]
+    public void HitAtKEvaluator_ReturnsZeroForHistoryWithoutEvaluableCases()
+    {
+        var predictor = new TransitionPredictor();
+        var evaluator = new HitAtKEvaluator();
+
+        NavigationEvent[] history = [new("A", DateTimeOffset.UnixEpoch, null)];
+
+        var result = evaluator.Evaluate(predictor, history, 3);
+
+        Assert.Equal(0, result.EvaluatedCases);
+        Assert.Equal(0, result.Hits);
+        Assert.Equal(0.0, result.HitRate);
+    }
 }
