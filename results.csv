@@ -1,0 +1,7 @@
+﻿Algorithm,K,EvaluatedCases,Hits,HitRate
+MostFrequentPredictor,1,8,0,0.000000
+MostFrequentPredictor,3,8,5,0.625000
+MostFrequentPredictor,5,8,8,1.000000
+TransitionPredictor,1,8,5,0.625000
+TransitionPredictor,3,8,8,1.000000
+TransitionPredictor,5,8,8,1.000000

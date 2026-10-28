@@ -222,4 +222,25 @@ public sealed class PredictionTests
         Assert.Equal(0, result.Hits);
         Assert.Equal(0.0, result.HitRate);
     }
+
+    [Fact]
+    public void HitAtKEvaluator_DoesNotLearnFromTestHistory()
+    {
+        var predictor = new TransitionPredictor();
+        var evaluator = new HitAtKEvaluator();
+
+        NavigationEvent[] trainingHistory = [new("B", DateTimeOffset.UnixEpoch, "A")];
+
+        NavigationEvent[] testHistory =
+        [
+            new("C", DateTimeOffset.UnixEpoch, "B"),
+            new("C", DateTimeOffset.UnixEpoch.AddMinutes(1), "B"),
+        ];
+
+        var result = evaluator.Evaluate(predictor, trainingHistory, testHistory, 1);
+
+        Assert.Equal(2, result.EvaluatedCases);
+        Assert.Equal(0, result.Hits);
+        Assert.Equal(0.0, result.HitRate);
+    }
 }
