@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="uk">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>New Tab — Cachd</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <main class="home">
+        <div class="top-bar">
+            <div class="brand">
+                <img src="../../Assets/Logos/logot1.png" alt="Cachd logo" class="brand-logo">
+                <span>cachd</span>
+            </div>
+
+            <div class="top-label">YOUR SPACE ON THE WEB</div>
+        </div>
+
+        <section class="hero">
+            <div class="greeting">WELCOME BACK</div>
+
+            <div id="clock" class="clock">00:00</div>
+            <div id="date" class="date"></div>
+
+            <h1>What are you looking for?</h1>
+
+            <form id="searchForm" class="search">
+                <span class="search-icon">⌕</span>
+
+                <input id="searchInput" type="text" placeholder="Search the web..." autocomplete="off" autofocus>
+
+                <button type="submit">↵</button>
+            </form>
+
+            <div class="search-hint">
+                SEARCH THE WEB <span>·</span> PRESS ENTER
+            </div>
+        </section>
+
+        <section class="shortcuts">
+            <div class="section-heading">
+                <span>MOST VISITED</span>
+                <span class="section-line"></span>
+            </div>
+
+            <div id="mostVisited" class="shortcut-grid">
+                <div class="empty-shortcuts">Your most visited pages will appear here.</div>
+            </div>
+        </section>
+
+        <footer>
+            <span>POWERED BY <strong>CACHD</strong></span>
+            <span>BUILT FOR YOUR NEXT MOVE.</span>
+        </footer>
+    </main>
+
+    <script src="script.js"></script>
+</body>
+
+</html>

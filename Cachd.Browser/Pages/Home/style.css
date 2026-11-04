@@ -1,0 +1,286 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --gold: #D9B141;
+    --purple: #6C4C96;
+    --white: #F1F1F1;
+    --muted: #AAB4BA;
+}
+
+body {
+    min-height: 100vh;
+    overflow: hidden;
+    color: var(--white);
+    font-family: "Segoe UI", sans-serif;
+
+    background:
+        linear-gradient(
+            180deg,
+            rgba(5, 16, 20, 0.35),
+            rgba(5, 16, 20, 0.78)
+        ),
+        url("../../Assets/Backgrounds/bg1.png");
+
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
+.home {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: 35px 55px 25px;
+}
+
+.top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+.brand-logo {
+    width: 36px;
+    height: 36px;
+    object-fit: contain;
+    border-radius: 8px;
+}
+
+.top-label,
+.greeting,
+.search-hint,
+.section-heading,
+footer {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--muted);
+}
+
+.hero {
+    width: min(620px, 90%);
+    margin: auto;
+    text-align: center;
+    transform: translateY(-20px);
+}
+
+.greeting {
+    color: var(--gold);
+    font-weight: 600;
+    margin-bottom: 12px;
+}
+
+.clock {
+    font-size: clamp(64px, 10vw, 100px);
+    line-height: 1;
+    font-weight: 300;
+    letter-spacing: -5px;
+    text-shadow: 0 5px 30px rgba(0, 0, 0, 0.3);
+}
+
+.date {
+    color: rgba(255, 255, 255, 0.75);
+    margin-top: 12px;
+    font-size: 14px;
+}
+
+.hero h1 {
+    font-size: 19px;
+    font-weight: 400;
+    margin: 48px 0 20px;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.search {
+    height: 62px;
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 15px;
+
+    background: rgba(5, 16, 20, 0.78);
+    border: 1px solid rgba(217, 177, 65, 0.35);
+    border-radius: 14px;
+
+    backdrop-filter: blur(18px);
+    box-shadow: 0 12px 45px rgba(0, 0, 0, 0.25);
+
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.search:focus-within {
+    border-color: var(--gold);
+    box-shadow: 0 0 0 3px rgba(217, 177, 65, 0.1);
+}
+
+.search-icon {
+    color: var(--gold);
+    font-size: 29px;
+}
+
+.search input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: white;
+    font-size: 15px;
+}
+
+.search input::placeholder {
+    color: rgba(255, 255, 255, 0.48);
+}
+
+.search button {
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-radius: 9px;
+    background: var(--gold);
+    color: #051014;
+    font-size: 19px;
+    cursor: pointer;
+    transition: transform 0.2s, background 0.2s;
+}
+
+.search button:hover {
+    background: #edc85d;
+    transform: translateY(-2px);
+}
+
+.search-hint {
+    margin-top: 14px;
+    font-size: 9px;
+}
+
+.search-hint span {
+    color: var(--gold);
+    margin: 0 5px;
+}
+
+.shortcuts {
+    width: min(460px, 90%);
+    margin: 0 auto 35px;
+}
+
+.section-heading {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 18px;
+}
+
+.section-line {
+    flex: 1;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.shortcut-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+}
+
+.shortcut {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 15px 5px;
+    border-radius: 13px;
+    text-decoration: none;
+    color: white;
+    font-size: 12px;
+
+    background: rgba(5, 16, 20, 0.48);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    backdrop-filter: blur(12px);
+
+    transition: 0.2s;
+}
+
+.shortcut:hover {
+    transform: translateY(-4px);
+    background: rgba(20, 32, 38, 0.85);
+    border-color: rgba(217, 177, 65, 0.4);
+}
+
+.shortcut-icon {
+    width: 38px;
+    height: 38px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border-radius: 11px;
+    font-size: 21px;
+    font-weight: 700;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.github {
+    color: white;
+}
+
+.youtube {
+    color: #FF5F57;
+}
+
+.google {
+    color: #72A7FF;
+}
+
+.reddit {
+    color: #FF8A55;
+}
+
+footer {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+}
+
+footer strong {
+    color: var(--gold);
+}
+
+@media (max-width: 600px) {
+    .home {
+        padding: 25px 20px;
+    }
+
+    .top-label,
+    footer span:last-child {
+        display: none;
+    }
+
+    .shortcut-grid {
+        gap: 7px;
+    }
+}
+.shortcut small {
+    color: var(--muted);
+    font-size: 10px;
+}
+
+.empty-shortcuts {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    padding: 20px;
+}
