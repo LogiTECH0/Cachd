@@ -1,4 +1,6 @@
-﻿using System.Windows;
+﻿
+using System.IO;
+using System.Windows;
 using CefSharp;
 using CefSharp.Wpf;
 
@@ -8,9 +10,28 @@ public partial class App : Application
 {
     protected override void OnStartup(StartupEventArgs e)
     {
-        var settings = new CefSettings();
+        CefSharpSettings.ShutdownOnExit = false;
 
-        Cef.Initialize(settings);
+        var cachePath = Path.Combine(
+            Environment.GetFolderPath(
+                Environment.SpecialFolder.LocalApplicationData),
+            "Cachd",
+            "Cache"
+        );
+
+        Directory.CreateDirectory(cachePath);
+
+        var settings = new CefSettings
+        {
+            CachePath = cachePath
+        };
+
+        if (!Cef.Initialize(settings))
+        {
+            throw new InvalidOperationException(
+                "Failed to initialize Chromium."
+            );
+        }
 
         base.OnStartup(e);
     }

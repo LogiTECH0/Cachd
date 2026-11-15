@@ -5,8 +5,10 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using Cachd.Browser.Handlers;
+using Cachd.Browser.Services;
 using Cachd.Core;
 using Cachd.Prediction;
+using Cachd.Preloading;
 using CefSharp;
 using CefBrowser = CefSharp.Wpf.ChromiumWebBrowser;
 
@@ -20,10 +22,20 @@ public partial class MainWindow : Window
     private readonly INextPagePredictor _transitionPredictor = new TransitionPredictor();
 
     private readonly INextPagePredictor _baselinePredictor = new MostFrequentPredictor();
+    private readonly PreloadingManager _preloadingManager = new();
+    private ChromiumPreloadExecutor? _preloadExecutor;
 
     public MainWindow()
     {
         InitializeComponent();
+        try
+        {
+            _preloadExecutor = new ChromiumPreloadExecutor();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Initialization failed: {ex}");
+        }
         LoadVisitHistory();
         AddTab();
     }
@@ -334,12 +346,14 @@ public partial class MainWindow : Window
     private void UpdatePredictions(BrowserTab tab)
     {
         PredictionsList.Items.Clear();
+
         if (
             !Uri.TryCreate(tab.CurrentUrl, UriKind.Absolute, out var uri)
             || uri.Scheme is not ("http" or "https")
         )
         {
             PredictionsList.Items.Add("Відкрий сторінку, щоб почати прогнозування.");
+
             return;
         }
 
@@ -355,6 +369,16 @@ public partial class MainWindow : Window
             PredictionsList.Items.Add("Недостатньо історії для прогнозування.");
 
             return;
+        }
+
+        if (_preloadExecutor is not null)
+        {
+            var candidate = _preloadingManager.SelectCandidate(tab.CurrentUrl, predictions);
+
+            if (candidate is not null)
+            {
+                _preloadExecutor.Preload(candidate);
+            }
         }
 
         foreach (var prediction in predictions)
@@ -589,6 +613,7 @@ public partial class MainWindow : Window
             tab.Browser.TitleChanged -= tab.TitleChangedHandler;
             tab.Browser.Dispose();
         }
+        _preloadExecutor?.Dispose();
 
         _tabs.Clear();
 

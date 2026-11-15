@@ -2,9 +2,11 @@
   <ItemGroup>
     <ProjectReference Include="..\Cachd.Core\Cachd.Core.csproj" />
     <ProjectReference Include="..\Cachd.Prediction\Cachd.Prediction.csproj" />
+    <ProjectReference Include="..\Cachd.Preloading\Cachd.Preloading.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="CefSharp.OffScreen.NETCore" Version="154.0.340" />
     <PackageReference Include="CefSharp.Wpf.NETCore" Version="154.0.340" />
   </ItemGroup>
 
