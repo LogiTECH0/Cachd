@@ -18,6 +18,7 @@ public partial class MainWindow : Window
 {
     private readonly List<BrowserTab> _tabs = [];
     private readonly List<string> _visitHistory = [];
+    private readonly List<NavigationEvent> _navigationHistory = [];
 
     private readonly INextPagePredictor _transitionPredictor = new TransitionPredictor();
 
@@ -28,6 +29,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        CheckRequestContext();
         try
         {
             _preloadExecutor = new ChromiumPreloadExecutor();
@@ -37,6 +39,7 @@ public partial class MainWindow : Window
             System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Initialization failed: {ex}");
         }
         LoadVisitHistory();
+        LoadNavigationHistory();
         AddTab();
     }
 
@@ -53,6 +56,54 @@ public partial class MainWindow : Window
             "Cachd",
             "history.json"
         );
+    private static string NavigationHistoryFilePath =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Cachd",
+            "navigation-history.json"
+        );
+
+    private void LoadNavigationHistory()
+    {
+        try
+        {
+            if (!File.Exists(NavigationHistoryFilePath))
+                return;
+
+            var history = JsonSerializer.Deserialize<List<NavigationEvent>>(
+                File.ReadAllText(NavigationHistoryFilePath)
+            );
+
+            if (history != null)
+                _navigationHistory.AddRange(history);
+
+            System.Diagnostics.Debug.WriteLine(
+                $"[Cachd History] Loaded: {_navigationHistory.Count} navigation events"
+            );
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Cachd History] Loading failed: {ex}");
+        }
+    }
+
+    private void SaveNavigationHistory()
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(NavigationHistoryFilePath)!;
+            Directory.CreateDirectory(directory);
+
+            File.WriteAllText(
+                NavigationHistoryFilePath,
+                JsonSerializer.Serialize(_navigationHistory)
+            );
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Cachd History] Saving failed: {ex}");
+        }
+    }
 
     private void LoadVisitHistory()
     {
@@ -95,15 +146,40 @@ public partial class MainWindow : Window
             .Where(url =>
                 Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
             )
-            .GroupBy(url => url, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(
+                url =>
+                {
+                    var host = new Uri(url).Host;
+
+                    return host.StartsWith("www.", StringComparison.OrdinalIgnoreCase)
+                        ? host[4..]
+                        : host;
+                },
+                StringComparer.OrdinalIgnoreCase
+            )
             .Select(group =>
             {
-                var uri = new Uri(group.Key);
+                var host = group.Key;
+                var uri = new Uri(group.First());
+
+                var title = host switch
+                {
+                    "github.com" => "GitHub",
+                    "youtube.com" => "YouTube",
+                    "spotify.com" => "Spotify",
+                    "google.com" => "Google",
+                    "vercel.com" => "Vercel",
+                    "wikipedia.org" => "Wikipedia",
+                    "chatgpt.com" => "ChatGPT",
+                    "reddit.com" => "Reddit",
+                    _ => host,
+                };
 
                 return new
                 {
-                    url = group.Key,
-                    title = uri.Host.Replace("www.", ""),
+                    url = uri.GetLeftPart(UriPartial.Authority) + "/",
+                    title,
+                    favicon = $"https://www.google.com/s2/favicons?domain={Uri.EscapeDataString(host)}&sz=64",
                     visits = group.Count(),
                 };
             })
@@ -192,6 +268,7 @@ public partial class MainWindow : Window
         tabItem.Header = header;
 
         var tab = new BrowserTab(browser, tabItem, titleText);
+        tab.History.AddRange(_navigationHistory);
 
         closeButton.Click += (_, _) => CloseTab(tab);
 
@@ -284,7 +361,9 @@ public partial class MainWindow : Window
 
         BrowserHost.Content = tab.Browser;
 
-        AddressBox.Text = tab.CurrentUrl ?? string.Empty;
+        AddressBox.Text = IsHomePage(tab.CurrentUrl)
+            ? string.Empty
+            : tab.CurrentUrl ?? string.Empty;
 
         UpdateSecurityIcon(tab.CurrentUrl);
 
@@ -321,15 +400,15 @@ public partial class MainWindow : Window
 
         if (isWebPage)
         {
-            tab.History.Add(new NavigationEvent(url, DateTimeOffset.Now, tab.CurrentUrl));
+            var navigationEvent = new NavigationEvent(url, DateTimeOffset.Now, tab.CurrentUrl);
+
+            tab.History.Add(navigationEvent);
+            _navigationHistory.Add(navigationEvent);
+
+            SaveNavigationHistory();
 
             _visitHistory.Add(url);
             SaveVisitHistory();
-
-            foreach (var homeTab in _tabs.Where(t => IsHomePage(t.CurrentUrl)))
-            {
-                UpdateHomePage(homeTab);
-            }
         }
 
         tab.CurrentUrl = url;
@@ -337,7 +416,10 @@ public partial class MainWindow : Window
 
         if (GetActiveTab() == tab)
         {
-            AddressBox.Text = isWebPage ? url : string.Empty;
+            AddressBox.Text =
+                IsHomePage(url) ? string.Empty
+                : isWebPage ? url
+                : string.Empty;
             UpdateSecurityIcon(url);
             UpdatePredictions(tab);
         }
@@ -356,35 +438,69 @@ public partial class MainWindow : Window
 
             return;
         }
+        foreach (var item in tab.History)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[HISTORY] Previous: {item.PreviousUrl} -> URL: {item.Url}"
+            );
+        }
+        System.Diagnostics.Debug.WriteLine("[Cachd Debug] UpdatePredictions reached!");
+        System.Diagnostics.Debug.WriteLine($"[Cachd Debug] Current URL: {tab.CurrentUrl}");
+        System.Diagnostics.Debug.WriteLine($"[Cachd Debug] History count: {tab.History.Count}");
 
+        foreach (var item in tab.History)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[Cachd Debug] History item: {item.PreviousUrl} -> {item.Url}"
+            );
+        }
         var predictions = _transitionPredictor.Predict(tab.History, tab.CurrentUrl, 5);
 
         if (predictions.Count == 0)
         {
             predictions = _baselinePredictor.Predict(tab.History, tab.CurrentUrl, 5);
-        }
-
-        if (predictions.Count == 0)
-        {
             PredictionsList.Items.Add("Недостатньо історії для прогнозування.");
-
             return;
         }
+        System.Diagnostics.Debug.WriteLine($"[Cachd Debug] Predictions count: {predictions.Count}");
 
-        if (_preloadExecutor is not null)
+        ////// ТЕСТИ ////// if (false && _preloadExecutor is not null) ////////// if (_preloadExecutor is not null)
+        if (false && _preloadExecutor is not null)
         {
             var candidate = _preloadingManager.SelectCandidate(tab.CurrentUrl, predictions);
 
+            System.Diagnostics.Debug.WriteLine(
+                $"[Cachd Debug] UpdatePredictions called: {tab.CurrentUrl}"
+            );
+            System.Diagnostics.Debug.WriteLine($"[Cachd Debug] History count: {tab.History.Count}");
+            System.Diagnostics.Debug.WriteLine($"[Cachd Debug] Current URL: {tab.CurrentUrl}");
+            System.Diagnostics.Debug.WriteLine($"[Cachd Debug] Current: {tab.CurrentUrl}");
+            System.Diagnostics.Debug.WriteLine($"[Cachd Debug] Candidate: {candidate ?? "NULL"}");
+
             if (candidate is not null)
             {
+                System.Diagnostics.Debug.WriteLine("[Cachd Debug] Calling Preload()");
                 _preloadExecutor.Preload(candidate);
             }
         }
-
+        /////// ТЕСТИ //////
         foreach (var prediction in predictions)
         {
-            PredictionsList.Items.Add($"{prediction.Url}  |  Score: {prediction.Score}");
+            System.Diagnostics.Debug.WriteLine(
+                $"[Cachd Debug] Prediction: {prediction.Url} | Score: {prediction.Score}"
+            );
         }
+    }
+
+    private void CheckRequestContext()
+    {
+        var context = Cef.GetGlobalRequestContext();
+
+        System.Diagnostics.Debug.WriteLine("[Cachd Cache] Global context:");
+
+        System.Diagnostics.Debug.WriteLine($"[Cachd Cache] IsGlobal: {context.IsGlobal}");
+
+        System.Diagnostics.Debug.WriteLine($"[Cachd Cache] CachePath: {context.CachePath}");
     }
 
     private void NavigateToAddress()

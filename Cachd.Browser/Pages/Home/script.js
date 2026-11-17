@@ -30,8 +30,11 @@ document.getElementById("searchForm").addEventListener("submit", (event) => {
     window.location.href =
         "https://www.google.com/search?q=" + encodeURIComponent(query);
 });
+
 function renderMostVisited(sites) {
     const container = document.getElementById("mostVisited");
+
+    if (!container) return;
 
     container.innerHTML = "";
 
@@ -51,7 +54,18 @@ function renderMostVisited(sites) {
 
         const icon = document.createElement("div");
         icon.className = "shortcut-icon";
-        icon.textContent = site.title.charAt(0).toUpperCase();
+
+        const favicon = document.createElement("img");
+        favicon.src = site.favicon;
+        favicon.alt = "";
+        favicon.loading = "lazy";
+
+        favicon.onerror = () => {
+            favicon.remove();
+            icon.textContent = site.title.charAt(0).toUpperCase();
+        };
+
+        icon.appendChild(favicon);
 
         const title = document.createElement("span");
         title.textContent = site.title;
