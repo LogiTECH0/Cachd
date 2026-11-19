@@ -13,6 +13,7 @@ public sealed class ChromiumPreloadExecutor : IDisposable
     private readonly HashSet<string> _queuedUrls = new(StringComparer.Ordinal);
     private readonly HashSet<string> _preloadedUrls = new(StringComparer.Ordinal);
     private readonly Queue<string> _preloadedOrder = new();
+    public event Action<string>? PreloadCompleted;
 
     private const int MaxPendingUrls = 5;
     private const int MaxPreloadedUrls = 100;
@@ -104,8 +105,6 @@ public sealed class ChromiumPreloadExecutor : IDisposable
         }
         System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Loading: {url}");
 
-        _browser.Load(url);
-
         StartNextPreload();
     }
 
@@ -157,6 +156,7 @@ public sealed class ChromiumPreloadExecutor : IDisposable
 
         string? activeUrl;
         string? loadedUrl = e.Browser.MainFrame?.Url;
+        string? successfullyPreloadedUrl = null;
 
         lock (_sync)
         {
@@ -189,13 +189,15 @@ public sealed class ChromiumPreloadExecutor : IDisposable
                 System.Diagnostics.Debug.WriteLine(
                     $"[Cachd Preloading] Completed: {activeUrl} -> {loadedUrl}"
                 );
+                successfullyPreloadedUrl = activeUrl;
             }
             else
             {
                 System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Failed: {activeUrl}");
             }
         }
-
+        if (successfullyPreloadedUrl is not null)
+            PreloadCompleted?.Invoke(successfullyPreloadedUrl);
         StartNextPreload();
     }
 

@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Cachd.Core\Cachd.Core.csproj" />
     <ProjectReference Include="..\Cachd.Prediction\Cachd.Prediction.csproj" />
+    <ProjectReference Include="..\Cachd.Preloading\Cachd.Preloading.csproj" />
   </ItemGroup>
 
 </Project>

@@ -24,20 +24,25 @@ public partial class MainWindow : Window
 
     private readonly INextPagePredictor _baselinePredictor = new MostFrequentPredictor();
     private readonly PreloadingManager _preloadingManager = new();
+    private readonly CacheManager _cacheManager = new();
     private ChromiumPreloadExecutor? _preloadExecutor;
 
     public MainWindow()
     {
         InitializeComponent();
         CheckRequestContext();
+
         try
         {
             _preloadExecutor = new ChromiumPreloadExecutor();
+
+            _preloadExecutor.PreloadCompleted += url => _cacheManager.MarkPreloaded(url);
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Initialization failed: {ex}");
         }
+
         LoadVisitHistory();
         LoadNavigationHistory();
         AddTab();
@@ -400,6 +405,7 @@ public partial class MainWindow : Window
 
         if (isWebPage)
         {
+            _cacheManager.MarkVisited(url);
             var navigationEvent = new NavigationEvent(url, DateTimeOffset.Now, tab.CurrentUrl);
 
             tab.History.Add(navigationEvent);
@@ -465,21 +471,24 @@ public partial class MainWindow : Window
         System.Diagnostics.Debug.WriteLine($"[Cachd Debug] Predictions count: {predictions.Count}");
 
         ////// ТЕСТИ ////// if (false && _preloadExecutor is not null) ////////// if (_preloadExecutor is not null)
-        if (false && _preloadExecutor is not null)
+        if (_preloadExecutor is not null)
         {
-            var candidate = _preloadingManager.SelectCandidate(tab.CurrentUrl, predictions);
-
-            System.Diagnostics.Debug.WriteLine(
-                $"[Cachd Debug] UpdatePredictions called: {tab.CurrentUrl}"
+            var candidate = _preloadingManager.SelectCandidate(
+                tab.CurrentUrl,
+                predictions,
+                _cacheManager
             );
-            System.Diagnostics.Debug.WriteLine($"[Cachd Debug] History count: {tab.History.Count}");
-            System.Diagnostics.Debug.WriteLine($"[Cachd Debug] Current URL: {tab.CurrentUrl}");
-            System.Diagnostics.Debug.WriteLine($"[Cachd Debug] Current: {tab.CurrentUrl}");
-            System.Diagnostics.Debug.WriteLine($"[Cachd Debug] Candidate: {candidate ?? "NULL"}");
 
             if (candidate is not null)
             {
-                System.Diagnostics.Debug.WriteLine("[Cachd Debug] Calling Preload()");
+                var prediction = predictions.First(p => p.Url == candidate);
+
+                _cacheManager.AddCandidate(candidate, prediction.Score);
+
+                System.Diagnostics.Debug.WriteLine(
+                    $"[Cachd Cache] Candidate registered: {candidate} | Score: {prediction.Score}"
+                );
+
                 _preloadExecutor.Preload(candidate);
             }
         }
