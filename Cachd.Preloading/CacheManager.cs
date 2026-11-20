@@ -3,6 +3,15 @@ namespace Cachd.Preloading;
 public sealed class CacheManager
 {
     private readonly object _lock = new();
+    private readonly int _maxCachedPages;
+
+    public CacheManager(int maxCachedPages = 30)
+    {
+        if (maxCachedPages < 1)
+            throw new ArgumentOutOfRangeException(nameof(maxCachedPages));
+
+        _maxCachedPages = maxCachedPages;
+    }
 
     private readonly Dictionary<string, CachedPage> _pages = new(StringComparer.Ordinal);
 
@@ -33,7 +42,7 @@ public sealed class CacheManager
 
                 return;
             }
-
+            EnsureCapacity();
             _pages[normalizedUrl] = new CachedPage
             {
                 Url = normalizedUrl,
@@ -43,9 +52,7 @@ public sealed class CacheManager
         }
     }
 
-    public void MarkPreloaded(
-    string url,
-    DateTimeOffset? currentTime = null)
+    public void MarkPreloaded(string url, DateTimeOffset? currentTime = null)
     {
         if (!TryNormalizeUrl(url, out var normalizedUrl))
             return;
@@ -65,9 +72,7 @@ public sealed class CacheManager
         }
     }
 
-    public void MarkVisited(
-    string url,
-    DateTimeOffset? currentTime = null)
+    public void MarkVisited(string url, DateTimeOffset? currentTime = null)
     {
         if (!TryNormalizeUrl(url, out var normalizedUrl))
             return;
@@ -162,6 +167,45 @@ public sealed class CacheManager
                 $"[Cachd Cache] Removed expired pages: {expiredUrls.Count}"
             );
         }
+    }
+
+    private void EnsureCapacity()
+    {
+        RemoveExpiredInternal();
+
+        if (_pages.Count < _maxCachedPages)
+            return;
+
+        var victim = _pages
+            .Values.Where(p => p.Status == CacheStatus.Candidate)
+            .OrderBy(p => p.PredictionScore)
+            .ThenBy(GetLastActivity)
+            .FirstOrDefault();
+
+        victim ??= _pages.Values.OrderBy(GetLastActivity).First();
+
+        _pages.Remove(victim.Url);
+
+        System.Diagnostics.Debug.WriteLine($"[Cachd Cache] Evicted: {victim.Url}");
+    }
+
+    private static DateTimeOffset GetLastActivity(CachedPage page)
+    {
+        return page.LastVisitedAt
+            ?? page.LastPreloadedAt
+            ?? page.FirstPreloadedAt
+            ?? DateTimeOffset.MinValue;
+    }
+
+    private void RemoveExpiredInternal()
+    {
+        var expiredUrls = _pages
+            .Where(pair => pair.Value.Status == CacheStatus.Expired)
+            .Select(pair => pair.Key)
+            .ToList();
+
+        foreach (var url in expiredUrls)
+            _pages.Remove(url);
     }
 
     private static CachedPage ClonePage(CachedPage page)

@@ -24,7 +24,7 @@ public partial class MainWindow : Window
 
     private readonly INextPagePredictor _baselinePredictor = new MostFrequentPredictor();
     private readonly PreloadingManager _preloadingManager = new();
-    private readonly CacheManager _cacheManager = new();
+    private readonly CacheManager _cacheManager = new(ResourceProfile.Balanced.MaxCachedPages);
     private ChromiumPreloadExecutor? _preloadExecutor;
 
     public MainWindow()

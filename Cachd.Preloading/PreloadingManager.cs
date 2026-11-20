@@ -10,6 +10,19 @@ public sealed class PreloadingManager
     private readonly HashSet<string> _scheduledUrls = new(
         StringComparer.OrdinalIgnoreCase);
 
+    public ResourceProfile Profile { get; private set; }
+
+    public PreloadingManager(ResourceProfile? profile = null)
+    {
+        Profile = profile ?? ResourceProfile.Balanced;
+    }
+
+    public void SetProfile(ResourceProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        Profile = profile;
+    }
+
     public string? SelectCandidate(
         string currentUrl,
         IReadOnlyList<PagePrediction> predictions,
@@ -21,6 +34,14 @@ public sealed class PreloadingManager
                 out var currentUri))
         {
             return null;
+        }
+
+        foreach (var scheduledUrl in _scheduledUrls.ToArray())
+        {
+            var page = cacheManager.GetPage(scheduledUrl);
+
+            if (page?.Status == CacheStatus.Expired)
+                _scheduledUrls.Remove(scheduledUrl);
         }
 
         foreach (var prediction in predictions
@@ -52,16 +73,17 @@ public sealed class PreloadingManager
 
             var cachedPage = cacheManager.GetPage(normalizedUrl);
 
-            // Сторінка вже є в кеші або очікує завантаження.
             if (cachedPage is not null &&
                 cachedPage.Status != CacheStatus.Expired)
             {
                 continue;
             }
 
-            // Повторний відбір раніше запланованої сторінки.
             if (cachedPage?.Status == CacheStatus.Expired)
                 _scheduledUrls.Remove(normalizedUrl);
+
+            if (_scheduledUrls.Count >= Profile.MaxPreloadedPages)
+                return null;
 
             if (_scheduledUrls.Add(normalizedUrl))
                 return normalizedUrl;
