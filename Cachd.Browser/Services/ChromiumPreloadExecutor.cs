@@ -1,69 +1,127 @@
+
 using System.Collections.Generic;
 using CefSharp;
 using CefSharp.OffScreen;
+using System.Linq;
 
 namespace Cachd.Browser.Services;
 
 public sealed class ChromiumPreloadExecutor : IDisposable
 {
-    private readonly ChromiumWebBrowser _browser;
-    private readonly object _sync = new();
+    private sealed class PreloadWorker
+    {
+        public ChromiumWebBrowser? Browser { get; set; }
 
+        public bool IsReady { get; set; }
+
+        public string? ActiveUrl { get; set; }
+
+        public EventHandler<LoadingStateChangedEventArgs>? LoadingHandler { get; set; }
+    }
+    private readonly object _sync = new();
+    private readonly List<PreloadWorker> _workers = [];
     private readonly Queue<string> _pendingUrls = new();
     private readonly HashSet<string> _queuedUrls = new(StringComparer.Ordinal);
     private readonly HashSet<string> _preloadedUrls = new(StringComparer.Ordinal);
     private readonly Queue<string> _preloadedOrder = new();
-    public event Action<string>? PreloadCompleted;
-
+    private readonly IRequestContext _requestContext;
     private const int MaxPendingUrls = 5;
-    private const int MaxPreloadedUrls = 100;
-
-    private bool _browserReady;
+    private readonly int _maxPreloadedUrls;
     private bool _disposed;
-    private string? _activeUrl;
+    public event Action<string>? PreloadCompleted;
+    public event Action<string>? PreloadFinished;
 
-    public ChromiumPreloadExecutor()
+    public ChromiumPreloadExecutor(
+        int maxPreloadedUrls = 100,
+        int maxConcurrentPreloads = 1)
     {
+        if (maxPreloadedUrls < 1)
+            throw new ArgumentOutOfRangeException(nameof(maxPreloadedUrls));
+
+        if (maxConcurrentPreloads < 1 || maxConcurrentPreloads > 4)
+            throw new ArgumentOutOfRangeException(nameof(maxConcurrentPreloads));
+
+        _maxPreloadedUrls = maxPreloadedUrls;
+        _requestContext = Cef.GetGlobalRequestContext();
+
+        System.Diagnostics.Debug.WriteLine(
+            $"[Cachd Cache] Shared context: {_requestContext.IsGlobal}");
+
+        System.Diagnostics.Debug.WriteLine(
+            $"[Cachd Cache] Cache path: {_requestContext.CachePath}");
+
+        for (var i = 0; i < maxConcurrentPreloads; i++)
+        {
+            CreateWorker(i);
+        }
+
+        System.Diagnostics.Debug.WriteLine(
+            $"[Cachd Preloading] Initialized with {maxConcurrentPreloads} workers.");
+    }
+
+    private void CreateWorker(int workerId)
+    {
+        var worker = new PreloadWorker();
+
         var settings = new BrowserSettings
         {
             Javascript = CefState.Disabled,
             WebGl = CefState.Disabled,
-            WindowlessFrameRate = 1,
+            WindowlessFrameRate = 1
         };
 
-        _browser = new ChromiumWebBrowser(
+        var browser = new ChromiumWebBrowser(
             address: "about:blank",
             browserSettings: settings,
-            requestContext: null,
+            requestContext: _requestContext,
             automaticallyCreateBrowser: true,
-            onAfterBrowserCreated: OnBrowserCreated,
+            onAfterBrowserCreated: browser =>
+                OnBrowserCreated(worker, workerId, browser),
             useLegacyRenderHandler: false
         );
-        var globalContext = Cef.GetGlobalRequestContext();
 
-        System.Diagnostics.Debug.WriteLine($"[Cachd Cache] IsGlobal: {globalContext.IsGlobal}");
+        worker.Browser = browser;
 
-        System.Diagnostics.Debug.WriteLine($"[Cachd Cache] CachePath: {globalContext.CachePath}");
+        worker.LoadingHandler = (_, args) =>
+            OnLoadingStateChanged(worker, workerId, args);
 
-        _browser.LoadingStateChanged += OnLoadingStateChanged;
+        browser.LoadingStateChanged += worker.LoadingHandler;
+
+        lock (_sync)
+        {
+            if (_disposed)
+            {
+                browser.LoadingStateChanged -= worker.LoadingHandler;
+                browser.Dispose();
+                return;
+            }
+
+            _workers.Add(worker);
+        }
     }
 
-    private void OnBrowserCreated(IBrowser browser)
+    private void OnBrowserCreated(
+        PreloadWorker worker,
+        int workerId,
+        IBrowser browser)
     {
         var context = browser.GetHost().RequestContext;
 
-        System.Diagnostics.Debug.WriteLine("[Cachd Cache] OffScreen Browser created");
+        System.Diagnostics.Debug.WriteLine(
+            $"[Cachd Preloading] Worker {workerId} created.");
 
-        System.Diagnostics.Debug.WriteLine($"[Cachd Cache] IsGlobal: {context.IsGlobal}");
+        System.Diagnostics.Debug.WriteLine(
+            $"[Cachd Cache] Worker {workerId} shared context: {context.IsGlobal}");
 
-        System.Diagnostics.Debug.WriteLine($"[Cachd Cache] CachePath: {context.CachePath}");
+        System.Diagnostics.Debug.WriteLine(
+            $"[Cachd Cache] Worker {workerId} cache path: {context.CachePath}");
 
         lock (_sync)
         {
             if (_disposed)
                 return;
 
-            _browserReady = true;
+            worker.IsReady = true;
         }
 
         StartNextPreload();
@@ -77,132 +135,221 @@ public sealed class ChromiumPreloadExecutor : IDisposable
         if (uri.Scheme is not ("http" or "https"))
             return;
 
+        var normalizedUrl = uri.AbsoluteUri;
+
         lock (_sync)
         {
             if (_disposed)
                 return;
 
-            if (_preloadedUrls.Contains(url))
+            if (_preloadedUrls.Contains(normalizedUrl))
             {
-                System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Already cached: {url}");
+                System.Diagnostics.Debug.WriteLine(
+                    $"[Cachd Preloading] Already cached: {normalizedUrl}");
+
                 return;
             }
 
-            if (_activeUrl == url || !_queuedUrls.Add(url))
+            if (_queuedUrls.Contains(normalizedUrl))
+                return;
+
+            if (_workers.Any(w => w.ActiveUrl == normalizedUrl))
                 return;
 
             if (_pendingUrls.Count >= MaxPendingUrls)
             {
-                _queuedUrls.Remove(url);
+                System.Diagnostics.Debug.WriteLine(
+                    $"[Cachd Preloading] Queue full: {normalizedUrl}");
 
-                System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Queue full: {url}");
                 return;
             }
 
-            _pendingUrls.Enqueue(url);
+            _queuedUrls.Add(normalizedUrl);
+            _pendingUrls.Enqueue(normalizedUrl);
 
-            System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Queued: {url}");
+            System.Diagnostics.Debug.WriteLine(
+                $"[Cachd Preloading] Queued: {normalizedUrl}");
         }
-        System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Loading: {url}");
 
         StartNextPreload();
     }
 
     private void StartNextPreload()
     {
-        string? url;
+        List<(PreloadWorker Worker, string Url)> tasks = [];
 
         lock (_sync)
         {
-            if (
-                _disposed
-                || !_browserReady
-                || _activeUrl is not null
-                || _pendingUrls.Count == 0
-                || _browser.IsLoading
-            )
-            {
+            if (_disposed || _pendingUrls.Count == 0)
                 return;
-            }
 
-            url = _pendingUrls.Dequeue();
-            _queuedUrls.Remove(url);
-            _activeUrl = url;
-        }
-
-        try
-        {
-            System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Loading: {url}");
-
-            _browser.Load(url);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Error: {ex.Message}");
-
-            lock (_sync)
+            foreach (var worker in _workers)
             {
-                _activeUrl = null;
-            }
+                if (_pendingUrls.Count == 0)
+                    break;
 
-            StartNextPreload();
+                if (!worker.IsReady ||
+                    worker.ActiveUrl is not null ||
+                    worker.Browser is null ||
+                    worker.Browser.IsLoading)
+                {
+                    continue;
+                }
+
+                var url = _pendingUrls.Dequeue();
+
+                _queuedUrls.Remove(url);
+                worker.ActiveUrl = url;
+
+                tasks.Add((worker, url));
+            }
+        }
+        foreach (var task in tasks)
+        {
+            StartPreload(task.Worker, task.Url);
         }
     }
 
-    private void OnLoadingStateChanged(object? sender, LoadingStateChangedEventArgs e)
+    private void StartPreload(PreloadWorker worker, string url)
+    {
+        try
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[Cachd Preloading] Started: {url}");
+
+            worker.Browser!.Load(url);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[Cachd Preloading] Start error: {url} | {ex.Message}");
+
+            CompletePreload(worker, url, false);
+        }
+    }
+
+    private void OnLoadingStateChanged(
+        PreloadWorker worker,
+        int workerId,
+        LoadingStateChangedEventArgs e)
     {
         if (e.IsLoading)
             return;
 
-        string? activeUrl;
         string? loadedUrl = e.Browser.MainFrame?.Url;
-        string? successfullyPreloadedUrl = null;
+
+        string? activeUrl;
 
         lock (_sync)
         {
             if (_disposed)
                 return;
 
-            activeUrl = _activeUrl;
+            activeUrl = worker.ActiveUrl;
 
             if (activeUrl is null)
                 return;
+        }
 
-            _activeUrl = null;
+        var success =
+            Uri.TryCreate(loadedUrl, UriKind.Absolute, out var uri) &&
+            uri.Scheme is "http" or "https";
 
-            if (
-                Uri.TryCreate(loadedUrl, UriKind.Absolute, out var uri)
-                && uri.Scheme is "http" or "https"
-            )
+        if (success)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[Cachd Preloading] Worker {workerId} completed: {activeUrl} -> {loadedUrl}");
+        }
+        else
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[Cachd Preloading] Worker {workerId} failed: {activeUrl}");
+        }
+
+        CompletePreload(worker, activeUrl, success);
+    }
+
+    private void CompletePreload(
+        PreloadWorker worker,
+        string url,
+        bool success)
+    {
+        string? completedUrl = null;
+
+        lock (_sync)
+        {
+            if (_disposed || worker.ActiveUrl != url)
+                return;
+
+            worker.ActiveUrl = null;
+
+            if (success && _preloadedUrls.Add(url))
             {
-                if (_preloadedUrls.Add(activeUrl))
-                {
-                    _preloadedOrder.Enqueue(activeUrl);
+                _preloadedOrder.Enqueue(url);
 
-                    while (_preloadedOrder.Count > MaxPreloadedUrls)
-                    {
-                        var oldest = _preloadedOrder.Dequeue();
-                        _preloadedUrls.Remove(oldest);
-                    }
+                while (_preloadedOrder.Count > _maxPreloadedUrls)
+                {
+                    var oldest = _preloadedOrder.Dequeue();
+                    _preloadedUrls.Remove(oldest);
                 }
 
-                System.Diagnostics.Debug.WriteLine(
-                    $"[Cachd Preloading] Completed: {activeUrl} -> {loadedUrl}"
-                );
-                successfullyPreloadedUrl = activeUrl;
-            }
-            else
-            {
-                System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Failed: {activeUrl}");
+                completedUrl = url;
             }
         }
-        if (successfullyPreloadedUrl is not null)
-            PreloadCompleted?.Invoke(successfullyPreloadedUrl);
+
+        if (completedUrl is not null)
+            RaiseEvent(PreloadCompleted, completedUrl);
+
+        RaiseEvent(PreloadFinished, url);
+
         StartNextPreload();
     }
 
+    private static void RaiseEvent(Action<string>? handler, string url)
+    {
+        if (handler is null)
+            return;
+
+        foreach (Action<string> callback in handler.GetInvocationList())
+        {
+            try
+            {
+                callback(url);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"[Cachd Preloading] Event error: {ex.Message}");
+            }
+        }
+    }
+    public void ClearPending()
+    {
+        List<string> removedUrls;
+
+        lock (_sync)
+        {
+            if (_disposed)
+                return;
+
+            removedUrls = _pendingUrls.ToList();
+
+            _pendingUrls.Clear();
+            _queuedUrls.Clear();
+        }
+
+        foreach (var url in removedUrls)
+        {
+            RaiseEvent(PreloadFinished, url);
+        }
+
+        System.Diagnostics.Debug.WriteLine(
+            $"[Cachd Preloading] Cleared {removedUrls.Count} pending tasks.");
+    }
     public void Dispose()
     {
+        List<PreloadWorker> workersToDispose;
+
         lock (_sync)
         {
             if (_disposed)
@@ -212,13 +359,34 @@ public sealed class ChromiumPreloadExecutor : IDisposable
 
             _pendingUrls.Clear();
             _queuedUrls.Clear();
+
             _preloadedUrls.Clear();
             _preloadedOrder.Clear();
 
-            _activeUrl = null;
+            foreach (var worker in _workers)
+            {
+                worker.ActiveUrl = null;
+                worker.IsReady = false;
+            }
+
+            workersToDispose = [.. _workers];
+            _workers.Clear();
         }
 
-        _browser.LoadingStateChanged -= OnLoadingStateChanged;
-        _browser.Dispose();
+        foreach (var worker in workersToDispose)
+        {
+            if (worker.Browser is null)
+                continue;
+
+            if (worker.LoadingHandler is not null)
+            {
+                worker.Browser.LoadingStateChanged -= worker.LoadingHandler;
+            }
+
+            worker.Browser.Dispose();
+        }
+
+        System.Diagnostics.Debug.WriteLine(
+            "[Cachd Preloading] Executor disposed.");
     }
 }

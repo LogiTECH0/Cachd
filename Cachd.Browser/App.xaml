@@ -4,6 +4,17 @@
              xmlns:local="clr-namespace:Cachd.Browser"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-         
+        <FontFamily x:Key="AppFont">
+            pack://application:,,,/Assets/Fonts/#Manrope
+        </FontFamily>
+        <Style TargetType="{x:Type TextBlock}">
+            <Setter Property="FontFamily"
+                    Value="{StaticResource AppFont}"/>
+        </Style>
+
+        <Style TargetType="{x:Type Control}">
+            <Setter Property="FontFamily"
+                    Value="{StaticResource AppFont}"/>
+        </Style>
     </Application.Resources>
 </Application>

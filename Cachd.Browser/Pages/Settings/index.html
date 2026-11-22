@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Settings — Cachd</title>
+    <link rel="stylesheet" href="style.css" />
+    <script src="script.js" defer></script>
+  </head>
+  <body>
+    <div class="settings-layout">
+      <aside class="sidebar">
+        <div class="brand">
+          <img src="cachd://assets/Logos/logot1.png" alt="Cachd" />
+          <span>cachd</span>
+        </div>
+
+        <div class="sidebar-label">PREFERENCES</div>
+
+        <nav>
+          <a href="#performance" class="nav-item">
+            <svg class="nav-icon" viewBox="0 0 24 24">
+              <path
+                d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"
+              />
+            </svg>
+            Performance
+          </a>
+
+          <a href="#privacy" class="nav-item">
+            <svg class="nav-icon" viewBox="0 0 24 24">
+              <path
+                d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"
+              />
+            </svg>
+            Privacy &amp; Security
+          </a>
+
+          <a href="#browser" class="nav-item">
+            <svg class="nav-icon" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+              <path d="M2 12h20" />
+            </svg>
+            Browser
+          </a>
+        </nav>
+
+        <div class="sidebar-bottom">
+          <a href="#about" class="nav-item">
+            <svg class="nav-icon" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 16v-4" />
+              <path d="M12 8h.01" />
+            </svg>
+            About Cachd
+          </a>
+          <div class="version">CACHD · DEVELOPMENT BUILD</div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <header class="page-header">
+          <div>
+            <div class="eyebrow">CACHD / PREFERENCES</div>
+            <h1>Settings</h1>
+            <p>Customize your browsing experience.</p>
+          </div>
+        </header>
+
+        <section id="performance" class="settings-section">
+          <div class="section-title">
+            <h2>Performance</h2>
+            <p>Configure how Cachd uses your system resources.</p>
+          </div>
+          <div class="system-banner" id="systemBanner">
+            <div class="system-info">
+              <div class="system-item">
+                <span class="system-label">YOUR RAM</span>
+                <strong id="systemRam">…</strong>
+              </div>
+
+              <div class="system-divider"></div>
+
+              <div class="system-item">
+                <span class="system-label">RECOMMENDED MODE</span>
+                <strong id="systemRecommended">…</strong>
+              </div>
+            </div>
+
+            <button
+              class="secondary-button"
+              id="applyRecommended"
+              type="button"
+            >
+              Apply
+            </button>
+          </div>
+          <div class="mode-grid">
+            <button class="mode-card" data-mode="low">
+              <span class="mode-icon">◈</span>
+              <strong>Low</strong>
+              <small>4 GB RAM</small>
+              <span class="mode-description">Resource saving</span>
+            </button>
+
+            <button class="mode-card selected" data-mode="balanced">
+              <span class="mode-icon">◉</span>
+              <strong>Balanced</strong>
+              <small>8 GB RAM</small>
+              <span class="mode-description">Recommended</span>
+            </button>
+
+            <button class="mode-card" data-mode="performance">
+              <span class="mode-icon">ϟ</span>
+              <strong>Performance</strong>
+              <small>16 GB RAM</small>
+              <span class="mode-description">Maximum speed</span>
+            </button>
+
+            <button class="mode-card" data-mode="custom">
+              <span class="mode-icon">⚙</span>
+              <strong>Custom</strong>
+              <small>Your settings</small>
+              <span class="mode-description">Manual control</span>
+            </button>
+          </div>
+
+          <div class="setting-card">
+            <div>
+              <h3>Predictive preloading</h3>
+              <p>Load predicted pages before you open them.</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="preloading" checked />
+              <span></span>
+            </label>
+          </div>
+
+          <div class="setting-card">
+            <div>
+              <h3>Memory Saver</h3>
+              <p>Reduce resource usage from inactive tabs.</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="memorySaver" checked />
+              <span></span>
+            </label>
+          </div>
+
+          <div class="setting-card">
+            <div>
+              <h3>Cache budget</h3>
+              <p>Maximum storage budget for cached resources.</p>
+            </div>
+            <select id="cacheBudget">
+              <option value="100">100 MB</option>
+              <option value="250">250 MB</option>
+              <option value="500">500 MB</option>
+              <option value="1000">1 GB</option>
+            </select>
+          </div>
+
+          <div class="setting-card">
+            <div>
+              <h3>Maximum parallel preloads</h3>
+              <p>How many pages can be preloaded simultaneously.</p>
+            </div>
+            <select id="parallelPreloads">
+              <option value="1">1 page</option>
+              <option value="2">2 pages</option>
+              <option value="3">3 pages</option>
+              <option value="4">4 pages</option>
+            </select>
+          </div>
+
+          <div class="custom-note" id="customNote">
+            <span>⚙</span>
+            Custom mode is active. Your performance settings are manually
+            configured.
+          </div>
+        </section>
+
+        <section id="privacy" class="settings-section">
+          <div class="section-title">
+            <h2>Privacy & Security</h2>
+            <p>Control your browsing data.</p>
+          </div>
+
+          <div class="setting-card">
+            <div>
+              <h3>Save browsing history</h3>
+              <p>Allow Cachd to remember visited websites.</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="saveHistory" checked />
+              <span></span>
+            </label>
+          </div>
+        </section>
+
+        <section id="browser" class="settings-section">
+          <div class="section-title">
+            <h2>Browser</h2>
+            <p>Configure your browsing experience.</p>
+          </div>
+
+          <div class="setting-card">
+            <div>
+              <h3>Startup page</h3>
+              <p>Choose the page opened in a new tab.</p>
+            </div>
+            <select id="startupPage">
+              <option value="home">Cachd Home</option>
+              <option value="blank">Blank page</option>
+            </select>
+          </div>
+        </section>
+
+        <section id="about" class="settings-section">
+          <div class="section-title">
+            <h2>About Cachd</h2>
+            <p>The browser that thinks ahead.</p>
+          </div>
+
+          <div class="about-card">
+            <img src="cachd://assets/Logos/logot1.png" alt="Cachd" />
+            <div>
+              <h3>Cachd Browser</h3>
+              <p>Intelligent browsing experience</p>
+              <span>Version w5.5 · Development</span>
+            </div>
+          </div>
+        </section>
+
+        <footer>
+          <span>POWERED BY <strong>CACHD</strong></span>
+          <span>BUILT FOR YOUR NEXT MOVE.</span>
+        </footer>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

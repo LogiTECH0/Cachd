@@ -6,148 +6,101 @@ namespace Cachd.Tests;
 
 public class PreloadingManagerTests
 {
-    [Fact]
-    public void SelectCandidate_ShouldRejectLowScore()
+    private static ResourceProfile TestProfile(int maxPages = 2)
     {
-        var manager = new PreloadingManager();
-        var cacheManager = new CacheManager();
-
-        var predictions = new[]
-        {
-            new PagePrediction("https://github.com/", 1)
-        };
-
-        var result = manager.SelectCandidate(
-            "https://google.com/",
-            predictions,
-            cacheManager);
-
-        Assert.Null(result);
+        return ResourceProfile.Custom(
+            maxPreloadedPages: maxPages,
+            maxCachedPages: 10,
+            maxConcurrentPreloads: 1,
+            cacheExpiration: TimeSpan.FromHours(24));
     }
 
     [Fact]
-    public void SelectCandidate_ShouldAcceptMinimumScore()
+    public void SelectCandidate_ShouldRespectMaxPreloadedPages()
     {
-        var manager = new PreloadingManager();
-        var cacheManager = new CacheManager();
+        var manager = new PreloadingManager(TestProfile(2));
+        var cache = new CacheManager();
 
         var predictions = new[]
         {
-            new PagePrediction("https://github.com/", 2)
+            new PagePrediction("https://first.com", 10),
+            new PagePrediction("https://second.com", 8),
+            new PagePrediction("https://third.com", 6)
         };
 
-        var result = manager.SelectCandidate(
-            "https://google.com/",
-            predictions,
-            cacheManager);
+        Assert.Equal(
+            "https://first.com/",
+            manager.SelectCandidate("https://current.com", predictions, cache));
 
-        Assert.Equal("https://github.com/", result);
+        Assert.Equal(
+            "https://second.com/",
+            manager.SelectCandidate("https://current.com", predictions, cache));
+
+        Assert.Null(
+            manager.SelectCandidate("https://current.com", predictions, cache));
     }
 
     [Fact]
-    public void SelectCandidate_ShouldSkipCurrentUrl()
+    public void CompletePreload_ShouldAllowAnotherCandidate()
     {
-        var manager = new PreloadingManager();
-        var cacheManager = new CacheManager();
+        var manager = new PreloadingManager(TestProfile(1));
+        var cache = new CacheManager();
 
-        var predictions = new[]
+        var first = new[]
         {
-            new PagePrediction("https://google.com/", 10)
+            new PagePrediction("https://first.com", 10)
         };
 
-        var result = manager.SelectCandidate(
-            "https://google.com/",
-            predictions,
-            cacheManager);
+        Assert.Equal(
+            "https://first.com/",
+            manager.SelectCandidate("https://current.com", first, cache));
 
-        Assert.Null(result);
+        manager.CompletePreload("https://first.com/");
+
+        var second = new[]
+        {
+            new PagePrediction("https://second.com", 8)
+        };
+
+        Assert.Equal(
+            "https://second.com/",
+            manager.SelectCandidate("https://current.com", second, cache));
     }
 
     [Fact]
-    public void SelectCandidate_ShouldRejectFileUrl()
+    public void SelectCandidate_ShouldSkipAlreadyActivePage()
     {
-        var manager = new PreloadingManager();
-        var cacheManager = new CacheManager();
+        var manager = new PreloadingManager(TestProfile());
+        var cache = new CacheManager();
+
+        cache.AddCandidate("https://active.com", 10);
+        cache.MarkPreloaded("https://active.com");
 
         var predictions = new[]
         {
-            new PagePrediction("file:///C:/test.html", 10)
+            new PagePrediction("https://active.com", 10),
+            new PagePrediction("https://other.com", 8)
         };
 
-        var result = manager.SelectCandidate(
-            "https://google.com/",
-            predictions,
-            cacheManager);
-
-        Assert.Null(result);
+        Assert.Equal(
+            "https://other.com/",
+            manager.SelectCandidate("https://current.com", predictions, cache));
     }
 
     [Fact]
-    public void SelectCandidate_ShouldNotScheduleSameUrlTwice()
+    public void SelectCandidate_ShouldSkipLowScorePredictions()
     {
-        var manager = new PreloadingManager();
-        var cacheManager = new CacheManager();
+        var manager = new PreloadingManager(TestProfile());
+        var cache = new CacheManager();
 
         var predictions = new[]
         {
-            new PagePrediction("https://github.com/", 5)
+            new PagePrediction("https://weak.com", 1),
+            new PagePrediction("https://strong.com", 5)
         };
 
-        var first = manager.SelectCandidate(
-            "https://google.com/",
-            predictions,
-            cacheManager);
-
-        var second = manager.SelectCandidate(
-            "https://google.com/",
-            predictions,
-            cacheManager);
-
-        Assert.Equal("https://github.com/", first);
-        Assert.Null(second);
-    }
-
-    [Fact]
-    public void SelectCandidate_ShouldSkipActivePage()
-    {
-        var manager = new PreloadingManager();
-        var cacheManager = new CacheManager();
-
-        cacheManager.AddCandidate("https://github.com/", 5);
-        cacheManager.MarkPreloaded("https://github.com/");
-
-        var predictions = new[]
-        {
-            new PagePrediction("https://github.com/", 10)
-        };
-
-        var result = manager.SelectCandidate(
-            "https://google.com/",
-            predictions,
-            cacheManager);
-
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void SelectCandidate_ShouldAllowExpiredPageAgain()
-    {
-        var manager = new PreloadingManager();
-        var cacheManager = new CacheManager();
-
-        cacheManager.AddCandidate("https://github.com/", 5);
-        cacheManager.MarkExpired("https://github.com/");
-
-        var predictions = new[]
-        {
-            new PagePrediction("https://github.com/", 10)
-        };
-
-        var result = manager.SelectCandidate(
-            "https://google.com/",
-            predictions,
-            cacheManager);
-
-        Assert.Equal("https://github.com/", result);
+        Assert.Equal(
+            "https://strong.com/",
+            manager.SelectCandidate("https://current.com", predictions, cache));
     }
 }

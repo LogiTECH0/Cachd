@@ -11,6 +11,7 @@ using Cachd.Prediction;
 using Cachd.Preloading;
 using CefSharp;
 using CefBrowser = CefSharp.Wpf.ChromiumWebBrowser;
+using Cachd.Browser.Settings;
 
 namespace Cachd.Browser;
 
@@ -23,36 +24,64 @@ public partial class MainWindow : Window
     private readonly INextPagePredictor _transitionPredictor = new TransitionPredictor();
 
     private readonly INextPagePredictor _baselinePredictor = new MostFrequentPredictor();
-    private readonly PreloadingManager _preloadingManager = new();
-    private readonly CacheManager _cacheManager = new(ResourceProfile.Balanced.MaxCachedPages);
+    private ResourceProfile _currentProfile = ResourceProfile.Balanced;
+
+    private readonly PreloadingManager _preloadingManager = new(
+        ResourceProfile.Balanced
+    );
+
+    private readonly CacheManager _cacheManager = new(
+        ResourceProfile.Balanced
+    );
     private ChromiumPreloadExecutor? _preloadExecutor;
 
     public MainWindow()
     {
         InitializeComponent();
+
         CheckRequestContext();
+
+        ApplyRuntimeSettings(App.CurrentSettings);
 
         try
         {
-            _preloadExecutor = new ChromiumPreloadExecutor();
+            _preloadExecutor = new ChromiumPreloadExecutor(
+                maxPreloadedUrls: 100,
+                maxConcurrentPreloads: _currentProfile.MaxConcurrentPreloads
+            );
 
-            _preloadExecutor.PreloadCompleted += url => _cacheManager.MarkPreloaded(url);
+            _preloadExecutor.PreloadCompleted +=
+                url => _cacheManager.MarkPreloaded(url);
+
+            _preloadExecutor.PreloadFinished +=
+                url => _preloadingManager.CompletePreload(url);
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Initialization failed: {ex}");
+            System.Diagnostics.Debug.WriteLine(
+                $"[Cachd Preloading] Initialization failed: {ex}");
         }
+
+        App.SettingsChanged += OnSettingsChanged;
 
         LoadVisitHistory();
         LoadNavigationHistory();
+        Strings.Language = App.CurrentSettings.Language;
+
         AddTab();
     }
 
     private string GetHomePageUrl()
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "Pages", "Home", "index.html");
-
-        return new Uri(path).AbsoluteUri;
+        return "cachd://home";
+    }
+    private string GetStartupPageUrl()
+    {
+        return App.CurrentSettings.StartupPage switch
+        {
+            "blank" => "about:blank",
+            _ => GetHomePageUrl()
+        };
     }
 
     private static string HistoryFilePath =>
@@ -67,7 +96,6 @@ public partial class MainWindow : Window
             "Cachd",
             "navigation-history.json"
         );
-
     private void LoadNavigationHistory()
     {
         try
@@ -193,6 +221,64 @@ public partial class MainWindow : Window
             .Take(4)
             .ToList();
     }
+    private static ResourceProfile CreateResourceProfile(
+    CachdSettings settings)
+    {
+        var baseProfile = settings.Mode switch
+        {
+            "low" => ResourceProfile.Low,
+            "performance" => ResourceProfile.Performance,
+            _ => ResourceProfile.Balanced
+        };
+
+        if (settings.Mode != "custom")
+            return baseProfile;
+
+        return ResourceProfile.Custom(
+            baseProfile.MaxPreloadedPages,
+            baseProfile.MaxCachedPages,
+            settings.MaxConcurrentPreloads,
+            baseProfile.CacheExpiration
+        );
+    }
+    private void ApplyRuntimeSettings(CachdSettings settings)
+    {
+        Strings.Language = settings.Language;
+        _currentProfile = CreateResourceProfile(settings);
+
+        _preloadingManager.SetProfile(_currentProfile);
+        _cacheManager.SetProfile(_currentProfile);
+
+        _preloadingManager.SetEnabled(settings.PreloadingEnabled);
+
+        if (!settings.PreloadingEnabled)
+        {
+            _preloadExecutor?.ClearPending();
+        }
+
+        System.Diagnostics.Debug.WriteLine(
+            $"[Cachd Settings] Mode: {settings.Mode}");
+
+        System.Diagnostics.Debug.WriteLine(
+            $"[Cachd Settings] Preloading: {settings.PreloadingEnabled}");
+
+        System.Diagnostics.Debug.WriteLine(
+            $"[Cachd Settings] Parallel preloads: {_currentProfile.MaxConcurrentPreloads}");
+    }
+    private void OnSettingsChanged(CachdSettings settings)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(
+                new Action(() => ApplyRuntimeSettings(settings))
+            );
+
+            return;
+        }
+        foreach (var tab in _tabs)
+            UpdateTabTitle(tab);
+        ApplyRuntimeSettings(settings);
+    }
 
     private void UpdateHomePage(BrowserTab tab)
     {
@@ -206,24 +292,23 @@ public partial class MainWindow : Window
 
     private bool IsHomePage(string? url)
     {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
-            return false;
-
-        return uri.IsFile
-            && uri.LocalPath.EndsWith(
-                Path.Combine("Pages", "Home", "index.html"),
-                StringComparison.OrdinalIgnoreCase
-            );
+        return Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            && uri.Scheme.Equals("cachd", StringComparison.OrdinalIgnoreCase)
+            && uri.Host.Equals("home", StringComparison.OrdinalIgnoreCase);
     }
 
     private void AddTab(string? url = null)
     {
-        url ??= GetHomePageUrl();
+        url ??= GetStartupPageUrl();
         var browser = new CefBrowser
         {
-            Address = url,
             KeyboardHandler = new BrowserKeyboardHandler(),
         };
+        browser.JavascriptObjectRepository.Register(
+            "cachdSystem",
+            new CachdSystemBridge()
+        );
+        browser.Address = url;
 
         var tabItem = new TabItem();
 
@@ -295,17 +380,8 @@ public partial class MainWindow : Window
             );
         };
 
-        tab.TitleChangedHandler = (_, e) =>
-        {
-            Dispatcher.BeginInvoke(
-                new Action(() =>
-                {
-                    var title = browser.Title;
-
-                    titleText.Text = string.IsNullOrWhiteSpace(title) ? "Нова вкладка" : title;
-                })
-            );
-        };
+        tab.TitleChangedHandler = (_, _) =>
+            Dispatcher.BeginInvoke(new Action(() => UpdateTabTitle(tab)));
 
         browser.FrameLoadEnd += tab.FrameLoadHandler;
         browser.TitleChanged += tab.TitleChangedHandler;
@@ -374,7 +450,32 @@ public partial class MainWindow : Window
 
         UpdatePredictions(tab);
     }
+    private void UpdateTabTitle(BrowserTab tab)
+    {
+        if (!_tabs.Contains(tab))
+            return;
 
+        tab.TitleText.Text = GetTabTitle(tab);
+    }
+
+    private string GetTabTitle(BrowserTab tab)
+    {
+        var url = tab.CurrentUrl ?? tab.Browser.Address;
+
+        if (IsHomePage(url))
+            return Strings.Get("tab.new");
+
+        var title = tab.Browser.Title?.Replace(" — Cachd", "").Trim();
+
+        if (!string.IsNullOrWhiteSpace(title) && !title.Contains("://"))
+            return title;
+
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            && uri.Scheme is "http" or "https")
+            return uri.Host;
+
+        return Strings.Get("tab.new");
+    }
     private static string GetDisplayTitle(string url)
     {
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
@@ -382,7 +483,7 @@ public partial class MainWindow : Window
             return uri.Host;
         }
 
-        return "Нова вкладка";
+        return Strings.Get("tab.new");
     }
 
     private void NewTab_Click(object sender, RoutedEventArgs e)
@@ -418,14 +519,11 @@ public partial class MainWindow : Window
         }
 
         tab.CurrentUrl = url;
-        tab.TitleText.Text = isWebPage ? uri.Host : "Нова вкладка";
+        UpdateTabTitle(tab);
 
         if (GetActiveTab() == tab)
         {
-            AddressBox.Text =
-                IsHomePage(url) ? string.Empty
-                : isWebPage ? url
-                : string.Empty;
+            AddressBox.Text = IsHomePage(url) ? string.Empty : url;
             UpdateSecurityIcon(url);
             UpdatePredictions(tab);
         }
@@ -440,7 +538,7 @@ public partial class MainWindow : Window
             || uri.Scheme is not ("http" or "https")
         )
         {
-            PredictionsList.Items.Add("Відкрий сторінку, щоб почати прогнозування.");
+            Strings.Get("pred.open");
 
             return;
         }
@@ -465,8 +563,7 @@ public partial class MainWindow : Window
         if (predictions.Count == 0)
         {
             predictions = _baselinePredictor.Predict(tab.History, tab.CurrentUrl, 5);
-            PredictionsList.Items.Add("Недостатньо історії для прогнозування.");
-            return;
+            Strings.Get("pred.few");
         }
         System.Diagnostics.Debug.WriteLine($"[Cachd Debug] Predictions count: {predictions.Count}");
 
@@ -524,21 +621,13 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(input))
             return;
 
-        if (
-            !Uri.TryCreate(input, UriKind.Absolute, out var uri)
-            || uri.Scheme is not ("http" or "https")
-        )
+        if (Uri.TryCreate(input, UriKind.Absolute, out var uri)
+    && (uri.Scheme == "http"
+        || uri.Scheme == "https"
+        || uri.Scheme == "cachd"))
         {
-            if (input.Contains(' '))
-            {
-                var query = Uri.EscapeDataString(input);
-
-                tab.Browser.Address = $"https://www.google.com/search?q={query}";
-
-                return;
-            }
-
-            input = $"https://{input}";
+            tab.Browser.Address = input;
+            return;
         }
 
         tab.Browser.Address = input;
@@ -739,7 +828,7 @@ public partial class MainWindow : Window
             tab.Browser.Dispose();
         }
         _preloadExecutor?.Dispose();
-
+        App.SettingsChanged -= OnSettingsChanged;
         _tabs.Clear();
 
         base.OnClosed(e);

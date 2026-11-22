@@ -35,7 +35,7 @@ public sealed class ResourceProfile
         Mode = ResourceMode.Balanced,
         MaxPreloadedPages = 3,
         MaxCachedPages = 30,
-        MaxConcurrentPreloads = 1,
+        MaxConcurrentPreloads = 2,
         CacheExpiration = TimeSpan.FromHours(24)
     };
 
@@ -44,7 +44,7 @@ public sealed class ResourceProfile
         Mode = ResourceMode.Performance,
         MaxPreloadedPages = 5,
         MaxCachedPages = 60,
-        MaxConcurrentPreloads = 2,
+        MaxConcurrentPreloads = 4,
         CacheExpiration = TimeSpan.FromHours(48)
     };
 
@@ -79,12 +79,13 @@ public sealed class ResourceProfile
 
     public static ResourceProfile DetectFromRam(int totalRamGb)
     {
-        if (totalRamGb <= 4)
+        if (totalRamGb < 8)
             return Low;
 
-        if (totalRamGb <= 8)
+        if (totalRamGb < 16)
             return Balanced;
 
         return Performance;
     }
+
 }

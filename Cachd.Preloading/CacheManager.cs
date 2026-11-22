@@ -1,9 +1,15 @@
+
 namespace Cachd.Preloading;
 
 public sealed class CacheManager
 {
     private readonly object _lock = new();
-    private readonly int _maxCachedPages;
+
+    private int _maxCachedPages;
+    private TimeSpan _cacheExpiration;
+
+    private readonly Dictionary<string, CachedPage> _pages =
+        new(StringComparer.Ordinal);
 
     public CacheManager(int maxCachedPages = 30)
     {
@@ -11,9 +17,25 @@ public sealed class CacheManager
             throw new ArgumentOutOfRangeException(nameof(maxCachedPages));
 
         _maxCachedPages = maxCachedPages;
+        _cacheExpiration = TimeSpan.FromHours(24);
     }
 
-    private readonly Dictionary<string, CachedPage> _pages = new(StringComparer.Ordinal);
+    public CacheManager(ResourceProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        _maxCachedPages = profile.MaxCachedPages;
+        _cacheExpiration = profile.CacheExpiration;
+    }
+
+    public int MaxCachedPages
+    {
+        get
+        {
+            lock (_lock)
+                return _maxCachedPages;
+        }
+    }
 
     public IReadOnlyCollection<CachedPage> Pages
     {
@@ -21,8 +43,26 @@ public sealed class CacheManager
         {
             lock (_lock)
             {
-                return _pages.Values.Select(ClonePage).ToArray();
+                ExpireOldPagesInternal(DateTimeOffset.UtcNow);
+
+                return _pages.Values
+                    .Select(ClonePage)
+                    .ToArray();
             }
+        }
+    }
+
+    public void SetProfile(ResourceProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        lock (_lock)
+        {
+            _maxCachedPages = profile.MaxCachedPages;
+            _cacheExpiration = profile.CacheExpiration;
+
+            ExpireOldPagesInternal(DateTimeOffset.UtcNow);
+            TrimToCapacity();
         }
     }
 
@@ -33,26 +73,38 @@ public sealed class CacheManager
 
         lock (_lock)
         {
+            ExpireOldPagesInternal(DateTimeOffset.UtcNow);
+
             if (_pages.TryGetValue(normalizedUrl, out var existing))
             {
                 existing.PredictionScore = predictionScore;
 
                 if (existing.Status == CacheStatus.Expired)
+                {
                     existing.Status = CacheStatus.Candidate;
+                    existing.FirstPreloadedAt = null;
+                    existing.LastPreloadedAt = null;
+                    existing.LastVisitedAt = null;
+                    existing.VisitCount = 0;
+                }
 
                 return;
             }
+
             EnsureCapacity();
+
             _pages[normalizedUrl] = new CachedPage
             {
                 Url = normalizedUrl,
                 PredictionScore = predictionScore,
-                Status = CacheStatus.Candidate,
+                Status = CacheStatus.Candidate
             };
         }
     }
 
-    public void MarkPreloaded(string url, DateTimeOffset? currentTime = null)
+    public void MarkPreloaded(
+        string url,
+        DateTimeOffset? currentTime = null)
     {
         if (!TryNormalizeUrl(url, out var normalizedUrl))
             return;
@@ -68,11 +120,14 @@ public sealed class CacheManager
             page.LastPreloadedAt = now;
             page.Status = CacheStatus.Active;
 
-            System.Diagnostics.Debug.WriteLine($"[Cachd Cache] Activated: {page.Url}");
+            System.Diagnostics.Debug.WriteLine(
+                $"[Cachd Cache] Activated: {page.Url}");
         }
     }
 
-    public void MarkVisited(string url, DateTimeOffset? currentTime = null)
+    public void MarkVisited(
+        string url,
+        DateTimeOffset? currentTime = null)
     {
         if (!TryNormalizeUrl(url, out var normalizedUrl))
             return;
@@ -86,8 +141,7 @@ public sealed class CacheManager
             page.VisitCount++;
 
             System.Diagnostics.Debug.WriteLine(
-                $"[Cachd Cache] Visited: {page.Url} | Count: {page.VisitCount}"
-            );
+                $"[Cachd Cache] Visited: {page.Url} | Count: {page.VisitCount}");
         }
     }
 
@@ -98,7 +152,11 @@ public sealed class CacheManager
 
         lock (_lock)
         {
-            return _pages.TryGetValue(normalizedUrl, out var page) ? ClonePage(page) : null;
+            ExpireOldPagesInternal(DateTimeOffset.UtcNow);
+
+            return _pages.TryGetValue(normalizedUrl, out var page)
+                ? ClonePage(page)
+                : null;
         }
     }
 
@@ -116,8 +174,7 @@ public sealed class CacheManager
 
     public int MarkInactivePagesExpired(
         TimeSpan inactivityLimit,
-        DateTimeOffset? currentTime = null
-    )
+        DateTimeOffset? currentTime = null)
     {
         if (inactivityLimit <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(inactivityLimit));
@@ -132,13 +189,12 @@ public sealed class CacheManager
                 if (page.Status != CacheStatus.Active)
                     continue;
 
-                var lastActivity =
-                    page.LastVisitedAt ?? page.LastPreloadedAt ?? page.FirstPreloadedAt;
+                var lastActivity = GetLastActivity(page);
 
-                if (lastActivity is null)
+                if (lastActivity == DateTimeOffset.MinValue)
                     continue;
 
-                if (now - lastActivity.Value < inactivityLimit)
+                if (now - lastActivity < inactivityLimit)
                     continue;
 
                 page.Status = CacheStatus.Expired;
@@ -146,7 +202,8 @@ public sealed class CacheManager
             }
         }
 
-        System.Diagnostics.Debug.WriteLine($"[Cachd Cache] Marked as expired: {expiredCount}");
+        System.Diagnostics.Debug.WriteLine(
+            $"[Cachd Cache] Marked as expired: {expiredCount}");
 
         return expiredCount;
     }
@@ -155,17 +212,7 @@ public sealed class CacheManager
     {
         lock (_lock)
         {
-            var expiredUrls = _pages
-                .Where(pair => pair.Value.Status == CacheStatus.Expired)
-                .Select(pair => pair.Key)
-                .ToList();
-
-            foreach (var url in expiredUrls)
-                _pages.Remove(url);
-
-            System.Diagnostics.Debug.WriteLine(
-                $"[Cachd Cache] Removed expired pages: {expiredUrls.Count}"
-            );
+            RemoveExpiredInternal();
         }
     }
 
@@ -173,28 +220,66 @@ public sealed class CacheManager
     {
         RemoveExpiredInternal();
 
-        if (_pages.Count < _maxCachedPages)
-            return;
+        while (_pages.Count >= _maxCachedPages)
+        {
+            var victim = _pages.Values
+                .Where(p => p.Status == CacheStatus.Candidate)
+                .OrderBy(p => p.PredictionScore)
+                .ThenBy(GetLastActivity)
+                .FirstOrDefault();
 
-        var victim = _pages
-            .Values.Where(p => p.Status == CacheStatus.Candidate)
-            .OrderBy(p => p.PredictionScore)
-            .ThenBy(GetLastActivity)
-            .FirstOrDefault();
+            victim ??= _pages.Values
+                .OrderBy(GetLastActivity)
+                .FirstOrDefault();
 
-        victim ??= _pages.Values.OrderBy(GetLastActivity).First();
+            if (victim is null)
+                break;
 
-        _pages.Remove(victim.Url);
+            _pages.Remove(victim.Url);
 
-        System.Diagnostics.Debug.WriteLine($"[Cachd Cache] Evicted: {victim.Url}");
+            System.Diagnostics.Debug.WriteLine(
+                $"[Cachd Cache] Evicted: {victim.Url}");
+        }
     }
 
-    private static DateTimeOffset GetLastActivity(CachedPage page)
+    private void TrimToCapacity()
     {
-        return page.LastVisitedAt
-            ?? page.LastPreloadedAt
-            ?? page.FirstPreloadedAt
-            ?? DateTimeOffset.MinValue;
+        RemoveExpiredInternal();
+
+        while (_pages.Count > _maxCachedPages)
+        {
+            var victim = _pages.Values
+                .Where(p => p.Status == CacheStatus.Candidate)
+                .OrderBy(p => p.PredictionScore)
+                .ThenBy(GetLastActivity)
+                .FirstOrDefault();
+
+            victim ??= _pages.Values
+                .OrderBy(GetLastActivity)
+                .First();
+
+            _pages.Remove(victim.Url);
+
+            System.Diagnostics.Debug.WriteLine(
+                $"[Cachd Cache] Evicted after profile change: {victim.Url}");
+        }
+    }
+
+    private void ExpireOldPagesInternal(DateTimeOffset now)
+    {
+        foreach (var page in _pages.Values)
+        {
+            if (page.Status != CacheStatus.Active)
+                continue;
+
+            var lastActivity = GetLastActivity(page);
+
+            if (lastActivity == DateTimeOffset.MinValue)
+                continue;
+
+            if (now - lastActivity >= _cacheExpiration)
+                page.Status = CacheStatus.Expired;
+        }
     }
 
     private void RemoveExpiredInternal()
@@ -208,6 +293,14 @@ public sealed class CacheManager
             _pages.Remove(url);
     }
 
+    private static DateTimeOffset GetLastActivity(CachedPage page)
+    {
+        return page.LastVisitedAt
+            ?? page.LastPreloadedAt
+            ?? page.FirstPreloadedAt
+            ?? DateTimeOffset.MinValue;
+    }
+
     private static CachedPage ClonePage(CachedPage page)
     {
         return new CachedPage
@@ -218,11 +311,13 @@ public sealed class CacheManager
             LastVisitedAt = page.LastVisitedAt,
             VisitCount = page.VisitCount,
             PredictionScore = page.PredictionScore,
-            Status = page.Status,
+            Status = page.Status
         };
     }
 
-    private static bool TryNormalizeUrl(string url, out string normalizedUrl)
+    private static bool TryNormalizeUrl(
+        string url,
+        out string normalizedUrl)
     {
         normalizedUrl = string.Empty;
 

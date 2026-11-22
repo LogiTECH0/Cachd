@@ -4,6 +4,10 @@
     <ProjectReference Include="..\Cachd.Prediction\Cachd.Prediction.csproj" />
     <ProjectReference Include="..\Cachd.Preloading\Cachd.Preloading.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Assets\Fonts\*.ttf" />
+    <None Update="Assets\Fonts\*.ttf" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="CefSharp.OffScreen.NETCore" Version="154.0.340" />
@@ -23,7 +27,7 @@
   <ItemGroup>
     <None Update="Assets\Backgrounds\bg1.png" CopyToOutputDirectory="PreserveNewest" />
 
-    <None Update="Pages\Home\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Pages\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

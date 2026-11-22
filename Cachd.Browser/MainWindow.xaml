@@ -11,7 +11,8 @@
         ResizeMode="CanResize"
         Background="#051014"
         Foreground="#E8E8E8"
-        PreviewKeyDown="Window_PreviewKeyDown">
+        PreviewKeyDown="Window_PreviewKeyDown"
+        FontFamily="{StaticResource AppFont}">
 
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome

@@ -8,9 +8,10 @@ public class ResourceProfileTests
     [Theory]
     [InlineData(2, ResourceMode.Low)]
     [InlineData(4, ResourceMode.Low)]
-    [InlineData(6, ResourceMode.Balanced)]
+    [InlineData(7, ResourceMode.Low)]
     [InlineData(8, ResourceMode.Balanced)]
-    [InlineData(12, ResourceMode.Performance)]
+    [InlineData(12, ResourceMode.Balanced)]
+    [InlineData(15, ResourceMode.Balanced)]
     [InlineData(16, ResourceMode.Performance)]
     [InlineData(32, ResourceMode.Performance)]
     public void DetectFromRam_ShouldSelectCorrectProfile(
@@ -39,7 +40,7 @@ public class ResourceProfileTests
 
         Assert.Equal(3, profile.MaxPreloadedPages);
         Assert.Equal(30, profile.MaxCachedPages);
-        Assert.Equal(1, profile.MaxConcurrentPreloads);
+        Assert.Equal(2, profile.MaxConcurrentPreloads);
     }
 
     [Fact]
@@ -49,7 +50,7 @@ public class ResourceProfileTests
 
         Assert.Equal(5, profile.MaxPreloadedPages);
         Assert.Equal(60, profile.MaxCachedPages);
-        Assert.Equal(2, profile.MaxConcurrentPreloads);
+        Assert.Equal(4, profile.MaxConcurrentPreloads);
     }
 
     [Fact]

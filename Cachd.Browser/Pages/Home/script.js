@@ -2,81 +2,82 @@ const clock = document.getElementById("clock");
 const date = document.getElementById("date");
 
 function updateClock() {
-    const now = new Date();
+  const now = new Date();
 
-    clock.textContent = now.toLocaleTimeString("uk-UA", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false
-    });
+  clock.textContent = now.toLocaleTimeString("uk-UA", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 
-    date.textContent = now.toLocaleDateString("uk-UA", {
-        weekday: "long",
-        day: "numeric",
-        month: "long"
-    });
+  date.textContent = now.toLocaleDateString("uk-UA", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
 }
 
 updateClock();
 setInterval(updateClock, 1000);
 
 document.getElementById("searchForm").addEventListener("submit", (event) => {
-    event.preventDefault();
+  event.preventDefault();
 
-    const query = document.getElementById("searchInput").value.trim();
+  const query = document.getElementById("searchInput").value.trim();
 
-    if (!query) return;
+  if (!query) return;
 
-    window.location.href =
-        "https://www.google.com/search?q=" + encodeURIComponent(query);
+  window.location.href =
+    "https://www.google.com/search?q=" + encodeURIComponent(query);
 });
 
 function renderMostVisited(sites) {
-    const container = document.getElementById("mostVisited");
+  const container = document.getElementById("mostVisited");
 
-    if (!container) return;
+  if (!container) return;
 
-    container.innerHTML = "";
+  container.innerHTML = "";
 
-    if (!sites || sites.length === 0) {
-        container.innerHTML = `
+  if (!sites || sites.length === 0) {
+    container.innerHTML = `
             <div class="empty-shortcuts">
                 Your most visited pages will appear here.
             </div>
         `;
-        return;
-    }
+    return;
+  }
 
-    sites.forEach(site => {
-        const link = document.createElement("a");
-        link.className = "shortcut";
-        link.href = site.url;
+  sites.forEach((site) => {
+    const link = document.createElement("a");
+    link.className = "shortcut";
+    link.href = site.url;
 
-        const icon = document.createElement("div");
-        icon.className = "shortcut-icon";
+    const icon = document.createElement("div");
+    icon.className = "shortcut-icon";
 
-        const favicon = document.createElement("img");
-        favicon.src = site.favicon;
-        favicon.alt = "";
-        favicon.loading = "lazy";
+    const favicon = document.createElement("img");
+    favicon.src = site.favicon;
+    favicon.alt = "";
+    favicon.loading = "lazy";
 
-        favicon.onerror = () => {
-            favicon.remove();
-            icon.textContent = site.title.charAt(0).toUpperCase();
-        };
+    favicon.onerror = () => {
+      favicon.remove();
+      icon.textContent = site.title.charAt(0).toUpperCase();
+    };
 
-        icon.appendChild(favicon);
+    icon.appendChild(favicon);
 
-        const title = document.createElement("span");
-        title.textContent = site.title;
+    const title = document.createElement("span");
+    title.textContent = site.title;
 
-        const visits = document.createElement("small");
-        visits.textContent = `${site.visits} visits`;
+    const visits = document.createElement("small");
+    visits.textContent =
+      site.visits === 1 ? "1 visit" : `${site.visits} visits`;
 
-        link.appendChild(icon);
-        link.appendChild(title);
-        link.appendChild(visits);
+    link.appendChild(icon);
+    link.appendChild(title);
+    link.appendChild(visits);
 
-        container.appendChild(link);
-    });
+    container.appendChild(link);
+  });
 }
