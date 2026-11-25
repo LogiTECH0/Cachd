@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="uk">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Offline — Cachd</title>
+
+    <style>
+        @font-face {
+            font-family: "Manrope";
+            src: url("cachd://assets/Fonts/Manrope-Regular.ttf") format("truetype");
+            font-weight: 400;
+        }
+
+        @font-face {
+            font-family: "Manrope";
+            src: url("cachd://assets/Fonts/Manrope-Medium.ttf") format("truetype");
+            font-weight: 500;
+        }
+
+        @font-face {
+            font-family: "Manrope";
+            src: url("cachd://assets/Fonts/Manrope-SemiBold.ttf") format("truetype");
+            font-weight: 600;
+        }
+
+        @font-face {
+            font-family: "Manrope";
+            src: url("cachd://assets/Fonts/Manrope-Bold.ttf") format("truetype");
+            font-weight: 700;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: "Manrope", sans-serif;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #051014;
+            color: #E8E8E8;
+            font-family: "Segoe UI", sans-serif;
+            padding: 24px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 460px;
+            text-align: center;
+        }
+
+        .icon {
+            width: 76px;
+            height: 76px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 28px;
+            border-radius: 22px;
+            background: #202B32;
+            color: #D9B141;
+            font-size: 34px;
+        }
+
+        h1 {
+            font-size: 27px;
+            margin-bottom: 12px;
+        }
+
+        p {
+            color: #AAB4BA;
+            font-size: 14px;
+            line-height: 1.7;
+        }
+
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 26px;
+            padding: 9px 14px;
+            background: #101A20;
+            border: 1px solid #34434B;
+            border-radius: 20px;
+            color: #AAB4BA;
+            font-size: 12px;
+        }
+
+        .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #D9B141;
+        }
+
+        button {
+            width: 100%;
+            margin-top: 30px;
+            padding: 13px;
+            border: none;
+            border-radius: 10px;
+            background: #D9B141;
+            color: #051014;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #E8C45D;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
+
+        .brand {
+            margin-top: 45px;
+            color: #D9B141;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 2px;
+        }
+
+        .cached-pages {
+            margin-top: 32px;
+            text-align: left;
+        }
+
+        .cached-pages-header {
+            font-size: 13px;
+            font-weight: 600;
+            color: #D9B141;
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .cached-page-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 14px;
+            background: #101A20;
+            border: 1px solid #34434B;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s;
+        }
+
+        .cached-page-item:hover {
+            background: #202B32;
+            border-color: #D9B141;
+        }
+
+        .cached-page-icon {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #051014;
+            border-radius: 6px;
+            color: #D9B141;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+
+        .cached-page-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .cached-page-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: #E8E8E8;
+            margin-bottom: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .cached-page-url {
+            font-size: 11px;
+            color: #AAB4BA;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .cached-page-meta {
+            font-size: 11px;
+            color: #6B7A82;
+            flex-shrink: 0;
+        }
+
+        .no-cached-pages {
+            padding: 20px;
+            background: #101A20;
+            border: 1px solid #34434B;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #6B7A82;
+        }
+    </style>
+</head>
+
+<body>
+    <main class="container">
+        <div class="icon">◇</div>
+
+        <h1>No Connection</h1>
+
+        <p>
+            We couldn't load this page. Check your internet connection and try again.
+        </p>
+
+        <div class="status">
+            <span class="dot"></span>
+            <span>Waiting for connection</span>
+        </div>
+
+        <button id="retryButton">
+            Try again
+        </button>
+
+        <div class="cached-pages" id="cachedPages" style="display: none;">
+            <div class="cached-pages-header">Available Offline</div>
+            <div id="cachedPagesList"></div>
+        </div>
+
+        <div class="brand">C A C H D</div>
+    </main>
+
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const targetUrl = params.get("url");
+
+        const retryButton = document.getElementById("retryButton");
+        const cachedPages = document.getElementById("cachedPages");
+        const cachedPagesList = document.getElementById("cachedPagesList");
+
+        if (!targetUrl) {
+            retryButton.textContent = "Go to Home";
+        }
+
+        retryButton.addEventListener("click", () => {
+            if (targetUrl) {
+                window.location.href = targetUrl;
+            } else {
+                window.location.href = "cachd://home";
+            }
+        });
+
+        const cacheParam = params.get("cache");
+        console.log("Cache param:", cacheParam);
+        if (cacheParam) {
+            try {
+                const pages = JSON.parse(decodeURIComponent(cacheParam));
+                console.log("Parsed pages:", pages);
+
+                if (pages && pages.length > 0) {
+                    cachedPages.style.display = "block";
+
+                    pages.forEach(page => {
+                        console.log("Creating page item:", page);
+                        const item = document.createElement("a");
+                        item.className = "cached-page-item";
+                        item.style.cursor = "pointer";
+                        item.style.textDecoration = "none";
+                        item.style.color = "inherit";
+                        item.href = page.mhtmlUrl || page.url;
+                        item.innerHTML = `
+                            <div class="cached-page-icon">◇</div>
+                            <div class="cached-page-info">
+                                <div class="cached-page-title">${page.title}</div>
+                                <div class="cached-page-url">${page.url}</div>
+                            </div>
+                            <div class="cached-page-meta">${page.visitCount} visits</div>
+                        `;
+                        cachedPagesList.appendChild(item);
+                    });
+                }
+            } catch (e) {
+                console.error("Failed to load cached pages:", e);
+            }
+        }
+    </script>
+</body>
+
+</html>

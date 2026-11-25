@@ -134,11 +134,29 @@ public sealed class CacheManager
 
         lock (_lock)
         {
+            ExpireOldPagesInternal(DateTimeOffset.UtcNow);
+
             if (!_pages.TryGetValue(normalizedUrl, out var page))
-                return;
+            {
+                EnsureCapacity();
+
+                page = new CachedPage
+                {
+                    Url = normalizedUrl,
+                    Status = CacheStatus.Active,
+                    FirstPreloadedAt = currentTime ?? DateTimeOffset.UtcNow,
+                    LastPreloadedAt = currentTime ?? DateTimeOffset.UtcNow
+                };
+
+                _pages[normalizedUrl] = page;
+
+                System.Diagnostics.Debug.WriteLine(
+                    $"[Cachd Cache] Added visited page: {page.Url}");
+            }
 
             page.LastVisitedAt = currentTime ?? DateTimeOffset.UtcNow;
             page.VisitCount++;
+            page.Status = CacheStatus.Active;
 
             System.Diagnostics.Debug.WriteLine(
                 $"[Cachd Cache] Visited: {page.Url} | Count: {page.VisitCount}");

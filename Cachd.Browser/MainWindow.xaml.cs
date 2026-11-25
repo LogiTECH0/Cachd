@@ -1,48 +1,57 @@
 ﻿using System.IO;
 using System.Text.Json;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
+using System.Windows.Interop;
 using Cachd.Browser.Handlers;
 using Cachd.Browser.Services;
+using Cachd.Browser.Settings;
 using Cachd.Core;
 using Cachd.Prediction;
 using Cachd.Preloading;
 using CefSharp;
+using CefSharp.DevTools.Network;
 using CefBrowser = CefSharp.Wpf.ChromiumWebBrowser;
-using Cachd.Browser.Settings;
+using CacheStatus = Cachd.Preloading.CacheStatus;
 
 namespace Cachd.Browser;
 
 public partial class MainWindow : Window
 {
+    private const int WmGetMinMaxInfo = 0x0024;
+    private const uint MonitorDefaultToNearest = 0x00000002;
+
     private readonly List<BrowserTab> _tabs = [];
     private readonly List<string> _visitHistory = [];
     private readonly List<NavigationEvent> _navigationHistory = [];
-
+    private bool _isOfflineModeEnabled;
     private readonly INextPagePredictor _transitionPredictor = new TransitionPredictor();
 
     private readonly INextPagePredictor _baselinePredictor = new MostFrequentPredictor();
     private ResourceProfile _currentProfile = ResourceProfile.Balanced;
 
-    private readonly PreloadingManager _preloadingManager = new(
-        ResourceProfile.Balanced
-    );
+    private readonly PreloadingManager _preloadingManager = new(ResourceProfile.Balanced);
 
-    private readonly CacheManager _cacheManager = new(
-        ResourceProfile.Balanced
-    );
+    private readonly CacheManager _cacheManager = new(ResourceProfile.Balanced);
+    private readonly OfflineCacheBridge _offlineCacheBridge;
+    private readonly OfflineSnapshotService _offlineSnapshotService;
     private ChromiumPreloadExecutor? _preloadExecutor;
 
     public MainWindow()
     {
         InitializeComponent();
+        SourceInitialized += (_, _) => AttachMaximizeWorkAreaHook();
 
         CheckRequestContext();
 
-        ApplyRuntimeSettings(App.CurrentSettings);
+        _offlineCacheBridge = new OfflineCacheBridge(_cacheManager);
+        _offlineSnapshotService = new OfflineSnapshotService();
 
+        ApplyRuntimeSettings(App.CurrentSettings);
         try
         {
             _preloadExecutor = new ChromiumPreloadExecutor(
@@ -50,16 +59,13 @@ public partial class MainWindow : Window
                 maxConcurrentPreloads: _currentProfile.MaxConcurrentPreloads
             );
 
-            _preloadExecutor.PreloadCompleted +=
-                url => _cacheManager.MarkPreloaded(url);
+            _preloadExecutor.PreloadCompleted += url => _cacheManager.MarkPreloaded(url);
 
-            _preloadExecutor.PreloadFinished +=
-                url => _preloadingManager.CompletePreload(url);
+            _preloadExecutor.PreloadFinished += url => _preloadingManager.CompletePreload(url);
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine(
-                $"[Cachd Preloading] Initialization failed: {ex}");
+            System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Initialization failed: {ex}");
         }
 
         App.SettingsChanged += OnSettingsChanged;
@@ -67,20 +73,191 @@ public partial class MainWindow : Window
         LoadVisitHistory();
         LoadNavigationHistory();
         Strings.Language = App.CurrentSettings.Language;
+        ApplyIntelligenceText();
 
         AddTab();
+    }
+
+    private void AttachMaximizeWorkAreaHook()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        HwndSource.FromHwnd(hwnd)?.AddHook(HandleMaximizeWorkArea);
+    }
+
+    private static IntPtr HandleMaximizeWorkArea(
+        IntPtr hwnd,
+        int message,
+        IntPtr wParam,
+        IntPtr lParam,
+        ref bool handled)
+    {
+        if (message != WmGetMinMaxInfo || lParam == IntPtr.Zero)
+            return IntPtr.Zero;
+
+        var monitor = MonitorFromWindow(hwnd, MonitorDefaultToNearest);
+        if (monitor == IntPtr.Zero)
+            return IntPtr.Zero;
+
+        var monitorInfo = new MonitorInfo
+        {
+            Size = Marshal.SizeOf<MonitorInfo>()
+        };
+        if (!GetMonitorInfo(monitor, ref monitorInfo))
+            return IntPtr.Zero;
+
+        var info = Marshal.PtrToStructure<MinMaxInfo>(lParam);
+        info.MaxPosition.X = monitorInfo.Work.Left - monitorInfo.Monitor.Left;
+        info.MaxPosition.Y = monitorInfo.Work.Top - monitorInfo.Monitor.Top;
+        info.MaxSize.X = monitorInfo.Work.Right - monitorInfo.Work.Left;
+        info.MaxSize.Y = monitorInfo.Work.Bottom - monitorInfo.Work.Top;
+        info.MaxTrackSize = info.MaxSize;
+        Marshal.StructureToPtr(info, lParam, false);
+        handled = true;
+        return IntPtr.Zero;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Point
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MinMaxInfo
+    {
+        public Point Reserved;
+        public Point MaxSize;
+        public Point MaxPosition;
+        public Point MinTrackSize;
+        public Point MaxTrackSize;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    private struct MonitorInfo
+    {
+        public int Size;
+        public Rect Monitor;
+        public Rect Work;
+        public uint Flags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Rect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    private async Task ApplyNetworkModeAsync(CefBrowser browser, bool offline)
+    {
+        if (!browser.IsBrowserInitialized)
+            return;
+
+        try
+        {
+            var devTools = browser.GetDevToolsClient();
+
+            var response = await devTools.ExecuteDevToolsMethodAsync(
+                "Network.emulateNetworkConditions",
+                new Dictionary<string, object>
+                {
+                    ["offline"] = offline,
+                    ["latency"] = 0,
+                    ["downloadThroughput"] = -1,
+                    ["uploadThroughput"] = -1,
+                }
+            );
+
+            Console.WriteLine(
+                $"[Cachd Offline] Mode: {(offline ? "ON" : "OFF")}, Success: {response.Success}"
+            );
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Cachd Offline] Error: {ex}");
+        }
+    }
+
+    private async void OfflineModeToggle_Click(object sender, RoutedEventArgs e)
+    {
+        _isOfflineModeEnabled = !_isOfflineModeEnabled;
+
+        OfflineModeToggleButton.Content = _isOfflineModeEnabled ? "Offline: ON" : "Offline: OFF";
+
+        OfflineModeToggleButton.Foreground = _isOfflineModeEnabled
+            ? new SolidColorBrush(Color.FromRgb(217, 177, 65))
+            : new SolidColorBrush(Color.FromRgb(170, 180, 186));
+
+        OfflineModeToggleButton.BorderBrush = _isOfflineModeEnabled
+            ? new SolidColorBrush(Color.FromRgb(217, 177, 65))
+            : new SolidColorBrush(Color.FromRgb(52, 67, 75));
+
+        _preloadExecutor?.SetPaused(_isOfflineModeEnabled);
+
+        foreach (var tab in _tabs)
+        {
+            await ApplyNetworkModeAsync(tab.Browser, _isOfflineModeEnabled);
+        }
+    }
+
+    private void OnLoadFailed(CefBrowser failedBrowser, string failedUrl)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            var tab = _tabs.FirstOrDefault(t => ReferenceEquals(t.Browser, failedBrowser));
+
+            if (tab == null)
+                return;
+
+            if (!Uri.TryCreate(failedUrl, UriKind.Absolute, out var uri))
+                return;
+
+            if (uri.Scheme is not ("http" or "https"))
+                return;
+
+            var snapshotUrl = _offlineCacheBridge.GetSnapshotFileUrl(uri.AbsoluteUri);
+            if (snapshotUrl is not null)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"[Cachd Offline] Opening saved snapshot for {uri.AbsoluteUri}: {snapshotUrl}");
+                tab.Browser.Address = snapshotUrl;
+                return;
+            }
+
+            var cachedPage = _cacheManager.GetPage(failedUrl);
+
+            System.Diagnostics.Debug.WriteLine(
+                $"[Cachd Offline] Load failed: {failedUrl} | Cached: {cachedPage?.Status}"
+            );
+
+            var cachedPagesJson = _offlineCacheBridge.GetCachedPagesJson();
+            var encodedCacheJson = Uri.EscapeDataString(cachedPagesJson);
+
+            tab.Browser.Address = $"cachd://offline?url={Uri.EscapeDataString(failedUrl)}&cache={encodedCacheJson}";
+        });
     }
 
     private string GetHomePageUrl()
     {
         return "cachd://home";
     }
+
     private string GetStartupPageUrl()
     {
         return App.CurrentSettings.StartupPage switch
         {
             "blank" => "about:blank",
-            _ => GetHomePageUrl()
+            _ => GetHomePageUrl(),
         };
     }
 
@@ -96,6 +273,7 @@ public partial class MainWindow : Window
             "Cachd",
             "navigation-history.json"
         );
+
     private void LoadNavigationHistory()
     {
         try
@@ -221,14 +399,14 @@ public partial class MainWindow : Window
             .Take(4)
             .ToList();
     }
-    private static ResourceProfile CreateResourceProfile(
-    CachdSettings settings)
+
+    private static ResourceProfile CreateResourceProfile(CachdSettings settings)
     {
         var baseProfile = settings.Mode switch
         {
             "low" => ResourceProfile.Low,
             "performance" => ResourceProfile.Performance,
-            _ => ResourceProfile.Balanced
+            _ => ResourceProfile.Balanced,
         };
 
         if (settings.Mode != "custom")
@@ -241,6 +419,7 @@ public partial class MainWindow : Window
             baseProfile.CacheExpiration
         );
     }
+
     private void ApplyRuntimeSettings(CachdSettings settings)
     {
         Strings.Language = settings.Language;
@@ -256,28 +435,33 @@ public partial class MainWindow : Window
             _preloadExecutor?.ClearPending();
         }
 
-        System.Diagnostics.Debug.WriteLine(
-            $"[Cachd Settings] Mode: {settings.Mode}");
+        System.Diagnostics.Debug.WriteLine($"[Cachd Settings] Mode: {settings.Mode}");
 
         System.Diagnostics.Debug.WriteLine(
-            $"[Cachd Settings] Preloading: {settings.PreloadingEnabled}");
+            $"[Cachd Settings] Preloading: {settings.PreloadingEnabled}"
+        );
 
         System.Diagnostics.Debug.WriteLine(
-            $"[Cachd Settings] Parallel preloads: {_currentProfile.MaxConcurrentPreloads}");
+            $"[Cachd Settings] Parallel preloads: {_currentProfile.MaxConcurrentPreloads}"
+        );
     }
+
     private void OnSettingsChanged(CachdSettings settings)
     {
         if (!Dispatcher.CheckAccess())
         {
-            Dispatcher.BeginInvoke(
-                new Action(() => ApplyRuntimeSettings(settings))
-            );
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                ApplyRuntimeSettings(settings);
+                ApplyIntelligenceText();
+            }));
 
             return;
         }
         foreach (var tab in _tabs)
             UpdateTabTitle(tab);
         ApplyRuntimeSettings(settings);
+        ApplyIntelligenceText();
     }
 
     private void UpdateHomePage(BrowserTab tab)
@@ -302,13 +486,32 @@ public partial class MainWindow : Window
         url ??= GetStartupPageUrl();
         var browser = new CefBrowser
         {
-            KeyboardHandler = new BrowserKeyboardHandler(),
+            KeyboardHandler = new BrowserKeyboardHandler()
         };
-        browser.JavascriptObjectRepository.Register(
-            "cachdSystem",
-            new CachdSystemBridge()
-        );
+
+        var requestHandler = new CachdRequestHandler(OnLoadFailed);
+        requestHandler.Attach(browser);
+
+        browser.JavascriptObjectRepository.Register("cachdSystem", new CachdSystemBridge());
+        browser.JavascriptObjectRepository.Register("cachdOffline", _offlineCacheBridge);
         browser.Address = url;
+        browser.IsBrowserInitializedChanged += (_, _) =>
+        {
+            if (browser.IsBrowserInitialized)
+            {
+                var context = browser.GetBrowser().GetHost().RequestContext;
+
+                System.Diagnostics.Debug.WriteLine(
+                    $"[Cachd Cache] Tab shared context: {context.IsGlobal}"
+                );
+
+                System.Diagnostics.Debug.WriteLine(
+                    $"[Cachd Cache] Tab cache path: {context.CachePath}"
+                );
+
+                _ = ApplyNetworkModeAsync(browser, _isOfflineModeEnabled);
+            }
+        };
 
         var tabItem = new TabItem();
 
@@ -362,28 +565,65 @@ public partial class MainWindow : Window
 
         closeButton.Click += (_, _) => CloseTab(tab);
 
-        tab.FrameLoadHandler = (_, e) =>
+        tab.FrameLoadHandler = async (_, e) =>
         {
             if (!e.Frame.IsMain)
                 return;
 
             var loadedUrl = e.Url;
 
-            Dispatcher.BeginInvoke(
-                new Action(() =>
-                {
-                    RecordNavigation(tab, loadedUrl);
+            await Dispatcher.BeginInvoke(new Action(() =>
+            {
+                RecordNavigation(tab, loadedUrl);
 
-                    if (IsHomePage(loadedUrl))
-                        UpdateHomePage(tab);
-                })
-            );
+                if (IsHomePage(loadedUrl))
+                    UpdateHomePage(tab);
+            })).Task;
+
+        };
+
+        tab.LoadingStateChangedHandler = (_, e) =>
+        {
+            if (e.IsLoading)
+                return;
+
+            var completedUrl = browser.GetBrowser()?.MainFrame?.Url;
+            Dispatcher.InvokeAsync(new Action(async () =>
+            {
+                if (!_tabs.Contains(tab)
+                    || tab.SnapshotSaveInProgress
+                    || !Uri.TryCreate(completedUrl, UriKind.Absolute, out var completedUri)
+                    || completedUri.Scheme is not ("http" or "https"))
+                    return;
+
+                tab.SnapshotSaveInProgress = true;
+                try
+                {
+                    if (!string.Equals(
+                            tab.Browser.GetBrowser()?.MainFrame?.Url,
+                            completedUri.AbsoluteUri,
+                            StringComparison.OrdinalIgnoreCase))
+                        return;
+
+                    var savedPath = await _offlineSnapshotService.SaveAsync(
+                        tab.Browser,
+                        loadCompletionSignaled: true);
+                    System.Diagnostics.Debug.WriteLine(savedPath is null
+                        ? $"[Cachd Offline] Snapshot unavailable for {completedUri}"
+                        : $"[Cachd Offline] Snapshot saved: {savedPath}");
+                }
+                finally
+                {
+                    tab.SnapshotSaveInProgress = false;
+                }
+            }), DispatcherPriority.Send);
         };
 
         tab.TitleChangedHandler = (_, _) =>
             Dispatcher.BeginInvoke(new Action(() => UpdateTabTitle(tab)));
 
         browser.FrameLoadEnd += tab.FrameLoadHandler;
+        browser.LoadingStateChanged += tab.LoadingStateChangedHandler;
         browser.TitleChanged += tab.TitleChangedHandler;
 
         _tabs.Add(tab);
@@ -405,6 +645,7 @@ public partial class MainWindow : Window
         }
 
         tab.Browser.FrameLoadEnd -= tab.FrameLoadHandler;
+        tab.Browser.LoadingStateChanged -= tab.LoadingStateChangedHandler;
         tab.Browser.TitleChanged -= tab.TitleChangedHandler;
 
         BrowserTabs.Items.Remove(tab.Item);
@@ -450,6 +691,7 @@ public partial class MainWindow : Window
 
         UpdatePredictions(tab);
     }
+
     private void UpdateTabTitle(BrowserTab tab)
     {
         if (!_tabs.Contains(tab))
@@ -470,12 +712,12 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(title) && !title.Contains("://"))
             return title;
 
-        if (Uri.TryCreate(url, UriKind.Absolute, out var uri)
-            && uri.Scheme is "http" or "https")
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
             return uri.Host;
 
         return Strings.Get("tab.new");
     }
+
     private static string GetDisplayTitle(string url)
     {
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
@@ -531,15 +773,15 @@ public partial class MainWindow : Window
 
     private void UpdatePredictions(BrowserTab tab)
     {
-        PredictionsList.Items.Clear();
+        PredictionsList.ItemsSource = null;
+        IntelligenceCount.Text = string.Empty;
 
         if (
             !Uri.TryCreate(tab.CurrentUrl, UriKind.Absolute, out var uri)
             || uri.Scheme is not ("http" or "https")
         )
         {
-            Strings.Get("pred.open");
-
+            SetIntelligenceEmptyState(Strings.Get("pred.open"));
             return;
         }
         foreach (var item in tab.History)
@@ -563,11 +805,25 @@ public partial class MainWindow : Window
         if (predictions.Count == 0)
         {
             predictions = _baselinePredictor.Predict(tab.History, tab.CurrentUrl, 5);
-            Strings.Get("pred.few");
         }
+
+        if (predictions.Count == 0)
+        {
+            SetIntelligenceEmptyState(Strings.Get("pred.few"));
+        }
+        else
+        {
+            PredictionsList.ItemsSource = predictions
+                .Select(CreateIntelligenceSuggestion)
+                .ToArray();
+            PredictionsList.Visibility = Visibility.Visible;
+            IntelligenceEmptyState.Visibility = Visibility.Collapsed;
+            IntelligenceCount.Text = predictions.Count.ToString();
+        }
+
         System.Diagnostics.Debug.WriteLine($"[Cachd Debug] Predictions count: {predictions.Count}");
 
-        ////// ТЕСТИ ////// if (false && _preloadExecutor is not null) ////////// if (_preloadExecutor is not null)
+        ////// ТЕСТИ //////
         if (_preloadExecutor is not null)
         {
             var candidate = _preloadingManager.SelectCandidate(
@@ -621,10 +877,10 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(input))
             return;
 
-        if (Uri.TryCreate(input, UriKind.Absolute, out var uri)
-    && (uri.Scheme == "http"
-        || uri.Scheme == "https"
-        || uri.Scheme == "cachd"))
+        if (
+            Uri.TryCreate(input, UriKind.Absolute, out var uri)
+            && (uri.Scheme == "http" || uri.Scheme == "https" || uri.Scheme == "cachd")
+        )
         {
             tab.Browser.Address = input;
             return;
@@ -692,6 +948,66 @@ public partial class MainWindow : Window
             IntelligencePanel.Visibility == Visibility.Visible
                 ? Visibility.Collapsed
                 : Visibility.Visible;
+    }
+
+    private void ApplyIntelligenceText()
+    {
+        IntelligenceTitle.Text = "Your suggestions";
+        IntelligenceSubtitle.Text = "Pages you may want to visit next";
+        IntelligenceSectionTitle.Text = "UP NEXT";
+        IntelligenceTip.Text = "Suggestions improve as you browse.";
+        IntelligenceToggleButton.ToolTip = "Your suggestions";
+        IntelligenceCloseButton.ToolTip = "Close suggestions";
+
+        if (PredictionsList.Items.Count == 0)
+        {
+            var activeTab = GetActiveTab();
+            var hasWebPage = activeTab is not null
+                && Uri.TryCreate(activeTab.CurrentUrl, UriKind.Absolute, out var uri)
+                && uri.Scheme is "http" or "https";
+            SetIntelligenceEmptyState(hasWebPage
+                ? "Browse a few more pages and suggestions will show up here."
+                : "Visit a website and helpful suggestions will appear here.");
+        }
+    }
+
+    private void SetIntelligenceEmptyState(string message)
+    {
+        IntelligenceEmptyState.Text = message;
+        IntelligenceEmptyState.Visibility = Visibility.Visible;
+        PredictionsList.Visibility = Visibility.Collapsed;
+        IntelligenceCount.Text = string.Empty;
+    }
+
+    private IntelligenceSuggestion CreateIntelligenceSuggestion(PagePrediction prediction)
+    {
+        if (!Uri.TryCreate(prediction.Url, UriKind.Absolute, out var uri))
+            return new IntelligenceSuggestion(prediction.Url, string.Empty, prediction.Url);
+
+        var host = uri.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase)
+            ? uri.Host[4..]
+            : uri.Host;
+        var path = uri.AbsolutePath.Trim('/');
+        var detail = string.IsNullOrEmpty(path)
+            ? "Website page"
+            : Uri.UnescapeDataString(path);
+
+        return new IntelligenceSuggestion(host, detail, prediction.Url);
+    }
+
+    private void PredictionsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (PredictionsList.SelectedItem is not IntelligenceSuggestion suggestion)
+            return;
+
+        var tab = GetActiveTab();
+        if (tab is not null)
+        {
+            tab.Browser.Address = suggestion.Url;
+            HideIntelligence();
+        }
+
+        PredictionsList.SelectedItem = null;
     }
 
     private void HideIntelligence()
@@ -824,6 +1140,7 @@ public partial class MainWindow : Window
         foreach (var tab in _tabs)
         {
             tab.Browser.FrameLoadEnd -= tab.FrameLoadHandler;
+            tab.Browser.LoadingStateChanged -= tab.LoadingStateChangedHandler;
             tab.Browser.TitleChanged -= tab.TitleChangedHandler;
             tab.Browser.Dispose();
         }
@@ -833,6 +1150,8 @@ public partial class MainWindow : Window
 
         base.OnClosed(e);
     }
+
+    private sealed record IntelligenceSuggestion(string Title, string Detail, string Url);
 
     private sealed class BrowserTab
     {
@@ -847,6 +1166,8 @@ public partial class MainWindow : Window
         public string? CurrentUrl { get; set; }
 
         public EventHandler<FrameLoadEndEventArgs> FrameLoadHandler { get; set; } = null!;
+        public EventHandler<LoadingStateChangedEventArgs> LoadingStateChangedHandler { get; set; } = null!;
+        public bool SnapshotSaveInProgress { get; set; }
 
         public DependencyPropertyChangedEventHandler TitleChangedHandler { get; set; } = null!;
 

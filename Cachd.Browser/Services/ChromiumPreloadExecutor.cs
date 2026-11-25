@@ -1,8 +1,7 @@
-
 using System.Collections.Generic;
+using System.Linq;
 using CefSharp;
 using CefSharp.OffScreen;
-using System.Linq;
 
 namespace Cachd.Browser.Services;
 
@@ -18,7 +17,9 @@ public sealed class ChromiumPreloadExecutor : IDisposable
 
         public EventHandler<LoadingStateChangedEventArgs>? LoadingHandler { get; set; }
     }
+
     private readonly object _sync = new();
+    private bool _paused;
     private readonly List<PreloadWorker> _workers = [];
     private readonly Queue<string> _pendingUrls = new();
     private readonly HashSet<string> _queuedUrls = new(StringComparer.Ordinal);
@@ -31,9 +32,7 @@ public sealed class ChromiumPreloadExecutor : IDisposable
     public event Action<string>? PreloadCompleted;
     public event Action<string>? PreloadFinished;
 
-    public ChromiumPreloadExecutor(
-        int maxPreloadedUrls = 100,
-        int maxConcurrentPreloads = 1)
+    public ChromiumPreloadExecutor(int maxPreloadedUrls = 100, int maxConcurrentPreloads = 1)
     {
         if (maxPreloadedUrls < 1)
             throw new ArgumentOutOfRangeException(nameof(maxPreloadedUrls));
@@ -45,10 +44,12 @@ public sealed class ChromiumPreloadExecutor : IDisposable
         _requestContext = Cef.GetGlobalRequestContext();
 
         System.Diagnostics.Debug.WriteLine(
-            $"[Cachd Cache] Shared context: {_requestContext.IsGlobal}");
+            $"[Cachd Cache] Shared context: {_requestContext.IsGlobal}"
+        );
 
         System.Diagnostics.Debug.WriteLine(
-            $"[Cachd Cache] Cache path: {_requestContext.CachePath}");
+            $"[Cachd Cache] Cache path: {_requestContext.CachePath}"
+        );
 
         for (var i = 0; i < maxConcurrentPreloads; i++)
         {
@@ -56,7 +57,24 @@ public sealed class ChromiumPreloadExecutor : IDisposable
         }
 
         System.Diagnostics.Debug.WriteLine(
-            $"[Cachd Preloading] Initialized with {maxConcurrentPreloads} workers.");
+            $"[Cachd Preloading] Initialized with {maxConcurrentPreloads} workers."
+        );
+    }
+
+    public void SetPaused(bool paused)
+    {
+        lock (_sync)
+        {
+            if (_disposed)
+                return;
+
+            _paused = paused;
+        }
+
+        if (paused)
+            ClearPending();
+        else
+            StartNextPreload();
     }
 
     private void CreateWorker(int workerId)
@@ -67,7 +85,7 @@ public sealed class ChromiumPreloadExecutor : IDisposable
         {
             Javascript = CefState.Disabled,
             WebGl = CefState.Disabled,
-            WindowlessFrameRate = 1
+            WindowlessFrameRate = 1,
         };
 
         var browser = new ChromiumWebBrowser(
@@ -75,15 +93,13 @@ public sealed class ChromiumPreloadExecutor : IDisposable
             browserSettings: settings,
             requestContext: _requestContext,
             automaticallyCreateBrowser: true,
-            onAfterBrowserCreated: browser =>
-                OnBrowserCreated(worker, workerId, browser),
+            onAfterBrowserCreated: browser => OnBrowserCreated(worker, workerId, browser),
             useLegacyRenderHandler: false
         );
 
         worker.Browser = browser;
 
-        worker.LoadingHandler = (_, args) =>
-            OnLoadingStateChanged(worker, workerId, args);
+        worker.LoadingHandler = (_, args) => OnLoadingStateChanged(worker, workerId, args);
 
         browser.LoadingStateChanged += worker.LoadingHandler;
 
@@ -100,21 +116,19 @@ public sealed class ChromiumPreloadExecutor : IDisposable
         }
     }
 
-    private void OnBrowserCreated(
-        PreloadWorker worker,
-        int workerId,
-        IBrowser browser)
+    private void OnBrowserCreated(PreloadWorker worker, int workerId, IBrowser browser)
     {
         var context = browser.GetHost().RequestContext;
 
-        System.Diagnostics.Debug.WriteLine(
-            $"[Cachd Preloading] Worker {workerId} created.");
+        System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Worker {workerId} created.");
 
         System.Diagnostics.Debug.WriteLine(
-            $"[Cachd Cache] Worker {workerId} shared context: {context.IsGlobal}");
+            $"[Cachd Cache] Worker {workerId} shared context: {context.IsGlobal}"
+        );
 
         System.Diagnostics.Debug.WriteLine(
-            $"[Cachd Cache] Worker {workerId} cache path: {context.CachePath}");
+            $"[Cachd Cache] Worker {workerId} cache path: {context.CachePath}"
+        );
 
         lock (_sync)
         {
@@ -145,7 +159,8 @@ public sealed class ChromiumPreloadExecutor : IDisposable
             if (_preloadedUrls.Contains(normalizedUrl))
             {
                 System.Diagnostics.Debug.WriteLine(
-                    $"[Cachd Preloading] Already cached: {normalizedUrl}");
+                    $"[Cachd Preloading] Already cached: {normalizedUrl}"
+                );
 
                 return;
             }
@@ -159,7 +174,8 @@ public sealed class ChromiumPreloadExecutor : IDisposable
             if (_pendingUrls.Count >= MaxPendingUrls)
             {
                 System.Diagnostics.Debug.WriteLine(
-                    $"[Cachd Preloading] Queue full: {normalizedUrl}");
+                    $"[Cachd Preloading] Queue full: {normalizedUrl}"
+                );
 
                 return;
             }
@@ -167,8 +183,7 @@ public sealed class ChromiumPreloadExecutor : IDisposable
             _queuedUrls.Add(normalizedUrl);
             _pendingUrls.Enqueue(normalizedUrl);
 
-            System.Diagnostics.Debug.WriteLine(
-                $"[Cachd Preloading] Queued: {normalizedUrl}");
+            System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Queued: {normalizedUrl}");
         }
 
         StartNextPreload();
@@ -180,7 +195,7 @@ public sealed class ChromiumPreloadExecutor : IDisposable
 
         lock (_sync)
         {
-            if (_disposed || _pendingUrls.Count == 0)
+            if (_disposed || _paused || _pendingUrls.Count == 0)
                 return;
 
             foreach (var worker in _workers)
@@ -188,10 +203,12 @@ public sealed class ChromiumPreloadExecutor : IDisposable
                 if (_pendingUrls.Count == 0)
                     break;
 
-                if (!worker.IsReady ||
-                    worker.ActiveUrl is not null ||
-                    worker.Browser is null ||
-                    worker.Browser.IsLoading)
+                if (
+                    !worker.IsReady
+                    || worker.ActiveUrl is not null
+                    || worker.Browser is null
+                    || worker.Browser.IsLoading
+                )
                 {
                     continue;
                 }
@@ -214,15 +231,15 @@ public sealed class ChromiumPreloadExecutor : IDisposable
     {
         try
         {
-            System.Diagnostics.Debug.WriteLine(
-                $"[Cachd Preloading] Started: {url}");
+            System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Started: {url}");
 
             worker.Browser!.Load(url);
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine(
-                $"[Cachd Preloading] Start error: {url} | {ex.Message}");
+                $"[Cachd Preloading] Start error: {url} | {ex.Message}"
+            );
 
             CompletePreload(worker, url, false);
         }
@@ -231,7 +248,8 @@ public sealed class ChromiumPreloadExecutor : IDisposable
     private void OnLoadingStateChanged(
         PreloadWorker worker,
         int workerId,
-        LoadingStateChangedEventArgs e)
+        LoadingStateChangedEventArgs e
+    )
     {
         if (e.IsLoading)
             return;
@@ -252,27 +270,26 @@ public sealed class ChromiumPreloadExecutor : IDisposable
         }
 
         var success =
-            Uri.TryCreate(loadedUrl, UriKind.Absolute, out var uri) &&
-            uri.Scheme is "http" or "https";
+            Uri.TryCreate(loadedUrl, UriKind.Absolute, out var uri)
+            && uri.Scheme is "http" or "https";
 
         if (success)
         {
             System.Diagnostics.Debug.WriteLine(
-                $"[Cachd Preloading] Worker {workerId} completed: {activeUrl} -> {loadedUrl}");
+                $"[Cachd Preloading] Worker {workerId} completed: {activeUrl} -> {loadedUrl}"
+            );
         }
         else
         {
             System.Diagnostics.Debug.WriteLine(
-                $"[Cachd Preloading] Worker {workerId} failed: {activeUrl}");
+                $"[Cachd Preloading] Worker {workerId} failed: {activeUrl}"
+            );
         }
 
         CompletePreload(worker, activeUrl, success);
     }
 
-    private void CompletePreload(
-        PreloadWorker worker,
-        string url,
-        bool success)
+    private void CompletePreload(PreloadWorker worker, string url, bool success)
     {
         string? completedUrl = null;
 
@@ -318,11 +335,11 @@ public sealed class ChromiumPreloadExecutor : IDisposable
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine(
-                    $"[Cachd Preloading] Event error: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[Cachd Preloading] Event error: {ex.Message}");
             }
         }
     }
+
     public void ClearPending()
     {
         List<string> removedUrls;
@@ -344,8 +361,10 @@ public sealed class ChromiumPreloadExecutor : IDisposable
         }
 
         System.Diagnostics.Debug.WriteLine(
-            $"[Cachd Preloading] Cleared {removedUrls.Count} pending tasks.");
+            $"[Cachd Preloading] Cleared {removedUrls.Count} pending tasks."
+        );
     }
+
     public void Dispose()
     {
         List<PreloadWorker> workersToDispose;
@@ -386,7 +405,6 @@ public sealed class ChromiumPreloadExecutor : IDisposable
             worker.Browser.Dispose();
         }
 
-        System.Diagnostics.Debug.WriteLine(
-            "[Cachd Preloading] Executor disposed.");
+        System.Diagnostics.Debug.WriteLine("[Cachd Preloading] Executor disposed.");
     }
 }
