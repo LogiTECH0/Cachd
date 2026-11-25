@@ -75,3 +75,14 @@ nunit-*.xml
 .DS_Store
 Thumbs.db
 desktop.ini
+# Build outputs
+**/bin/
+**/obj/
+
+# Published application
+/publish/
+/dist/
+
+# Temporary files
+*.user
+*.suo
