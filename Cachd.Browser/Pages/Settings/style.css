@@ -42,6 +42,29 @@
   color-scheme: dark;
 }
 
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: #f4f6f7;
+  --surface: #ffffff;
+  --surface-hover: #edf1f2;
+  --white: #172126;
+  --muted: #66747b;
+  --border: rgba(23, 33, 38, 0.12);
+}
+
+:root[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: #c4cdd1;
+  border-color: var(--background);
+}
+
+:root[data-theme="light"] .toggle span {
+  background: #c4cdd1;
+}
+
+:root[data-theme="light"] .toggle input:checked + span::before {
+  background: #ffffff;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
 }
@@ -83,7 +106,7 @@ body {
   width: 245px;
   flex-shrink: 0;
   padding: 30px 20px;
-  background: rgba(16, 26, 32, 0.85);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -240,7 +263,7 @@ h1 {
 }
 
 select {
-  background: #1b292f;
+  background: var(--surface-hover);
   color: var(--white);
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -632,7 +655,7 @@ option {
   justify-content: space-between;
   gap: 12px;
   padding: 10px 12px 10px 14px;
-  background: #1b292f;
+  background: var(--surface-hover);
   color: var(--white);
   border: 1px solid var(--border);
   border-radius: 9px;
@@ -643,7 +666,7 @@ option {
 }
 
 .select-trigger:hover {
-  background: #20323a;
+  background: var(--surface-hover);
   border-color: rgba(217, 177, 65, 0.4);
 }
 
@@ -678,10 +701,10 @@ option {
   right: 0;
   z-index: 50;
   padding: 5px;
-  background: #121e24;
+  background: var(--surface);
   border: 1px solid rgba(217, 177, 65, 0.3);
   border-radius: 11px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
 
   opacity: 0;
   visibility: hidden;

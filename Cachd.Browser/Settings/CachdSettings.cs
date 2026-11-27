@@ -10,5 +10,6 @@ public sealed class CachdSettings
     public int MaxConcurrentPreloads { get; set; } = 2;
     public bool ManualOverride { get; set; } = false;
     public string StartupPage { get; set; } = "home";
+    public string Theme { get; set; } = "dark";
     public string Language { get; set; } = "uk";
 }

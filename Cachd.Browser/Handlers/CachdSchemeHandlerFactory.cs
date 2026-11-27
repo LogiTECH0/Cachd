@@ -26,20 +26,31 @@ public sealed class CachdSchemeHandlerFactory : ISchemeHandlerFactory
                 fileName = Uri.UnescapeDataString(uri.AbsolutePath.TrimStart('/'));
             }
 
-            var offlinePagesDir = Path.Combine(
+            var offlinePagesDir = Path.GetFullPath(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Cachd",
                 "OfflinePages"
-            );
+            ));
 
-            var fullPath = Path.Combine(offlinePagesDir, fileName);
+            fileName = Path.GetFileName(fileName);
+            var fullPath = Path.GetFullPath(Path.Combine(offlinePagesDir, fileName));
+            if (!fullPath.StartsWith(
+                    offlinePagesDir + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase))
+                return NotFound();
 
             if (File.Exists(fullPath))
             {
                 System.Diagnostics.Debug.WriteLine(
                     $"[Cachd MHTML] Found exact match: {fullPath}");
-                return ResourceHandler.FromFilePath(fullPath, "application/x-mimearchive", autoDisposeStream: true);
+                var offlineMimeType = Path.GetExtension(fullPath).Equals(".mhtml", StringComparison.OrdinalIgnoreCase)
+                    ? "application/x-mimearchive"
+                    : Cef.GetMimeType(Path.GetExtension(fullPath));
+                return ResourceHandler.FromFilePath(fullPath, offlineMimeType, autoDisposeStream: true);
             }
+
+            if (!Directory.Exists(offlinePagesDir))
+                return NotFound();
 
             var files = Directory.GetFiles(offlinePagesDir, "*.mhtml");
             var matchingFile = files.FirstOrDefault(f =>

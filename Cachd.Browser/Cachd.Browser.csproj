@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <None Update="Assets\Backgrounds\bg1.png" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Assets\Backgrounds\bg1-light.png" CopyToOutputDirectory="PreserveNewest" />
 
     <None Update="Pages\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

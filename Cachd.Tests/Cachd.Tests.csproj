@@ -24,4 +24,9 @@
     <ProjectReference Include="..\Cachd.Preloading\Cachd.Preloading.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\Cachd.Browser\Services\OfflineSnapshotResolver.cs" Link="Services\OfflineSnapshotResolver.cs" />
+    <Compile Include="..\Cachd.Browser\Services\MhtmlParser.cs" Link="Services\MhtmlParser.cs" />
+  </ItemGroup>
+
 </Project>

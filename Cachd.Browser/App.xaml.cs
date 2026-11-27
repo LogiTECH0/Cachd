@@ -47,6 +47,18 @@ public partial class App : Application
         settings.RegisterScheme(new CefCustomScheme
         {
             SchemeName = "cachd",
+            IsStandard = true,
+            IsLocal = true,
+            IsSecure = true,
+            SchemeHandlerFactory = new CachdSchemeHandlerFactory()
+        });
+
+        settings.RegisterScheme(new CefCustomScheme
+        {
+            SchemeName = "cachd-mhtml",
+            IsStandard = true,
+            IsLocal = true,
+            IsSecure = true,
             SchemeHandlerFactory = new CachdSchemeHandlerFactory()
         });
 

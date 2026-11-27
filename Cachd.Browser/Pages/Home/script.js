@@ -1,6 +1,18 @@
 const clock = document.getElementById("clock");
 const date = document.getElementById("date");
 
+async function loadTheme() {
+  try {
+    await CefSharp.BindObjectAsync("cachdSystem");
+    const settings = JSON.parse(await cachdSystem.getSettingsJson());
+    document.documentElement.dataset.theme = settings.theme === "light" ? "light" : "dark";
+  } catch (error) {
+    console.warn("[Cachd Home] Could not load theme setting.", error);
+  }
+}
+
+loadTheme();
+
 function updateClock() {
   const now = new Date();
 

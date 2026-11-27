@@ -13,8 +13,8 @@ namespace Cachd.Browser.Services;
 public sealed class OfflineSnapshotService
 {
     private readonly string _storageDirectory;
-    private const string FormStateMarker = "data-cachd-local-form-state=\"v1\"";
-    private const string LegacyFormStateMarker = "<" + "!-- Cachd local form state v1 --" + ">";
+    private const string FormStateMarker = "data-cachd-local-form-state=\"v2\"";
+    private const string SourceHashMarker = "data-cachd-source-hash=\"";
 
     public OfflineSnapshotService()
     {
@@ -78,6 +78,16 @@ public sealed class OfflineSnapshotService
                 .Page
                 .CaptureSnapshotAsync(CefSharp.DevTools.Page.CaptureSnapshotFormat.Mhtml);
 
+            if (!string.Equals(
+                    cefBrowser.MainFrame?.Url,
+                    uri.AbsoluteUri,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    "[Cachd Offline] Snapshot discarded because navigation changed during capture.");
+                return null;
+            }
+
             System.Diagnostics.Debug.WriteLine(
                 $"[Cachd Offline] MHTML save - Data length: {response.Data?.Length ?? 0}");
 
@@ -98,7 +108,7 @@ public sealed class OfflineSnapshotService
                 $"{hash}.mhtml"
             );
 
-            if (!IsUsableArchive(response.Data))
+            if (!OfflineSnapshotResolver.IsValidSnapshotArchive(response.Data, normalizedUrl))
                 return null;
 
             var temporaryPath = filePath + ".tmp";
@@ -146,14 +156,6 @@ public sealed class OfflineSnapshotService
         }
     }
 
-    private static bool IsUsableArchive(string data)
-    {
-        return data.Contains("MIME-Version:", StringComparison.OrdinalIgnoreCase)
-            && data.Contains("multipart/related", StringComparison.OrdinalIgnoreCase)
-            && data.Contains("Content-Type: text/html", StringComparison.OrdinalIgnoreCase)
-            && data.Contains("Content-Location:", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static bool LooksLikeHtmlDocument(string content)
     {
         return content.Contains("<html", StringComparison.OrdinalIgnoreCase)
@@ -168,12 +170,21 @@ public sealed class OfflineSnapshotService
                 return null;
 
             var htmlPath = Path.ChangeExtension(mhtmlPath, ".html");
+            var sourceHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(mhtmlPath)));
             if (File.Exists(htmlPath))
             {
                 var existingHtml = File.ReadAllText(htmlPath);
                 if (existingHtml.Contains(FormStateMarker, StringComparison.Ordinal)
-                    || existingHtml.Contains(LegacyFormStateMarker, StringComparison.Ordinal))
-                    return htmlPath;
+                    && existingHtml.Contains(SourceHashMarker, StringComparison.Ordinal))
+                {
+                    var hashMatch = Regex.Match(
+                        existingHtml,
+                        @"data-cachd-source-hash=""([0-9A-F]+)""",
+                        RegexOptions.IgnoreCase);
+                    if (hashMatch.Success
+                        && hashMatch.Groups[1].Value.Equals(sourceHash, StringComparison.OrdinalIgnoreCase))
+                        return htmlPath;
+                }
             }
 
             var extractedHtml = MhtmlParser.ExtractHtmlWithResources(mhtmlPath);
@@ -181,7 +192,7 @@ public sealed class OfflineSnapshotService
                 return null;
 
             var snapshotId = Path.GetFileNameWithoutExtension(mhtmlPath);
-            var preparedHtml = PrepareInteractiveHtml(extractedHtml, snapshotId);
+            var preparedHtml = PrepareInteractiveHtml(extractedHtml, snapshotId, sourceHash);
             var temporaryPath = htmlPath + ".tmp";
             File.WriteAllText(temporaryPath, preparedHtml, Encoding.UTF8);
             File.Move(temporaryPath, htmlPath, overwrite: true);
@@ -195,7 +206,7 @@ public sealed class OfflineSnapshotService
         }
     }
 
-    private static string PrepareInteractiveHtml(string html, string snapshotId)
+    private static string PrepareInteractiveHtml(string html, string snapshotId, string sourceHash)
     {
         html = Regex.Replace(html, @"<script\b[^>]*>[\s\S]*?</script\s*>", "", RegexOptions.IgnoreCase);
         html = Regex.Replace(html, @"<(iframe|object|embed|applet|frame)\b[^>]*>[\s\S]*?</\1\s*>", "", RegexOptions.IgnoreCase);
@@ -212,7 +223,9 @@ public sealed class OfflineSnapshotService
                 : match.Value,
             RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
-        var script = FormStateScript.Replace("__SNAPSHOT_ID__", snapshotId, StringComparison.Ordinal);
+        var script = FormStateScript
+            .Replace("__SNAPSHOT_ID__", snapshotId, StringComparison.Ordinal)
+            .Replace("__SOURCE_HASH__", sourceHash, StringComparison.Ordinal);
         var bodyEnd = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
         return bodyEnd >= 0
             ? html.Insert(bodyEnd, script)
@@ -220,7 +233,7 @@ public sealed class OfflineSnapshotService
     }
 
     private const string FormStateScript = """
-        <script data-cachd-local-form-state="v1">
+        <script data-cachd-local-form-state="v2" data-cachd-source-hash="__SOURCE_HASH__">
         (() => {
           const storageKey = 'cachd-form-state-v1:__SNAPSHOT_ID__';
           const excluded = /password|passwd|passcode|secret|token|auth|csrf|cookie|credit|card|cvv|cvc|ssn|social.?security|one.?time.?code|(^|[^a-z])otp([^a-z]|$)|(^|[^a-z])pin([^a-z]|$)/i;
@@ -310,4 +323,3 @@ public sealed class OfflineSnapshotService
         """;
 }
 
-internal sealed record OfflineSnapshotMetadata(string Url, DateTimeOffset SavedAt);

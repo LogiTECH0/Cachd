@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using Cachd.Core;
 using Cachd.Preloading;
 
 namespace Cachd.Browser.Services;
@@ -21,6 +22,7 @@ public sealed class OfflineCacheBridge
 
     public string GetCachedPagesJson()
     {
+        var savedVisitCounts = LoadSavedVisitCounts();
         var visitData = _cacheManager.Pages.ToDictionary(
             p => p.Url,
             p => p,
@@ -31,7 +33,7 @@ public sealed class OfflineCacheBridge
         {
             foreach (var mhtmlPath in Directory.EnumerateFiles(_storageDirectory, "*.mhtml"))
             {
-                var metadata = ReadMetadata(mhtmlPath);
+                var metadata = OfflineSnapshotResolver.ReadMetadata(mhtmlPath);
                 if (metadata is null)
                     continue;
 
@@ -40,10 +42,12 @@ public sealed class OfflineCacheBridge
                 pages.Add((page?.LastVisitedAt ?? metadata.SavedAt, new
                     {
                         url = metadata.Url,
-                        mhtmlUrl = new Uri(openPath).AbsoluteUri,
+                        mhtmlUrl = CreateOfflineUrl(openPath),
                         title = GetTitleFromUrl(metadata.Url),
                         lastVisited = (page?.LastVisitedAt ?? metadata.SavedAt).ToUnixTimeSeconds(),
-                        visitCount = page?.VisitCount ?? 0
+                        visitCount = page is { VisitCount: > 0 }
+                            ? page.VisitCount
+                            : savedVisitCounts.GetValueOrDefault(metadata.Url)
                     }));
             }
         }
@@ -53,76 +57,40 @@ public sealed class OfflineCacheBridge
             .Select(page => page.Page));
     }
 
-    public string? GetSnapshotFileUrl(string url)
-    {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var requestedUri)
-            || requestedUri.Scheme is not ("http" or "https")
-            || !Directory.Exists(_storageDirectory))
-            return null;
-
-        foreach (var mhtmlPath in Directory.EnumerateFiles(_storageDirectory, "*.mhtml"))
-        {
-            var metadata = ReadMetadata(mhtmlPath);
-            if (metadata is not null
-                && Uri.Compare(new Uri(metadata.Url), requestedUri,
-                    UriComponents.AbsoluteUri, UriFormat.SafeUnescaped,
-                    StringComparison.OrdinalIgnoreCase) == 0)
-            {
-                var htmlPath = OfflineSnapshotService.EnsureInteractiveHtml(mhtmlPath);
-                return new Uri(htmlPath ?? mhtmlPath).AbsoluteUri;
-            }
-        }
-
-        return null;
-    }
-
-    private static OfflineSnapshotMetadata? ReadMetadata(string mhtmlPath)
+    private static Dictionary<string, int> LoadSavedVisitCounts()
     {
         try
         {
-            if (!File.Exists(mhtmlPath))
-                return null;
+            var historyPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Cachd",
+                "navigation-history.json");
+            if (!File.Exists(historyPath))
+                return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
-            var metadataPath = mhtmlPath + ".json";
-            OfflineSnapshotMetadata? metadata = null;
-            if (File.Exists(metadataPath))
-                metadata = JsonSerializer.Deserialize<OfflineSnapshotMetadata>(File.ReadAllText(metadataPath));
-
-            if (metadata is null)
-            {
-                using var reader = new StreamReader(mhtmlPath);
-                string? line;
-                var bytesRead = 0;
-                string? recoveredUrl = null;
-                while ((line = reader.ReadLine()) is not null && bytesRead < 65536)
-                {
-                    bytesRead += line.Length + 2;
-                    if (line.StartsWith("Content-Location:", StringComparison.OrdinalIgnoreCase))
-                    {
-                        recoveredUrl = line["Content-Location:".Length..].Trim();
-                        break;
-                    }
-                }
-
-                if (recoveredUrl is not null)
-                    metadata = new OfflineSnapshotMetadata(
-                        recoveredUrl,
-                        new DateTimeOffset(File.GetLastWriteTimeUtc(mhtmlPath), TimeSpan.Zero));
-            }
-
-            if (metadata is null
-                || !Uri.TryCreate(metadata.Url, UriKind.Absolute, out var uri)
-                || uri.Scheme is not ("http" or "https"))
-                return null;
-
-            return metadata with { Url = uri.AbsoluteUri };
+            return (JsonSerializer.Deserialize<List<NavigationEvent>>(File.ReadAllText(historyPath)) ?? [])
+                .GroupBy(item => item.Url, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[Cachd Offline] Invalid snapshot metadata: {ex.Message}");
-            return null;
+            System.Diagnostics.Debug.WriteLine($"[Cachd Offline] Could not load saved visit counts: {ex.Message}");
+            return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         }
     }
+
+    public string? GetSnapshotFileUrl(string url)
+    {
+        var snapshotPath = OfflineSnapshotResolver.FindSnapshotPath(_storageDirectory, url);
+        if (snapshotPath is null)
+            return null;
+
+        var htmlPath = OfflineSnapshotService.EnsureInteractiveHtml(snapshotPath);
+        return CreateOfflineUrl(htmlPath ?? snapshotPath);
+    }
+
+    private static string CreateOfflineUrl(string path)
+        => $"cachd-mhtml://{Uri.EscapeDataString(Path.GetFileName(path))}";
 
     private static string GetTitleFromUrl(string url)
     {

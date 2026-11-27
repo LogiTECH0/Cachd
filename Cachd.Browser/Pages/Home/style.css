@@ -9,6 +9,28 @@
   --purple: #6c4c96;
   --white: #f1f1f1;
   --muted: #aab4ba;
+  --text: #f1f1f1;
+  --date: rgba(255, 255, 255, 0.75);
+  --hero-text: rgba(255, 255, 255, 0.9);
+  --panel: rgba(5, 16, 20, 0.78);
+  --shortcut: rgba(5, 16, 20, 0.48);
+  --shortcut-hover: rgba(20, 32, 38, 0.85);
+  --panel-border: rgba(255, 255, 255, 0.07);
+  --line: rgba(255, 255, 255, 0.15);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --white: #172126;
+  --muted: #66747b;
+  --text: #172126;
+  --date: rgba(23, 33, 38, 0.72);
+  --hero-text: rgba(23, 33, 38, 0.9);
+  --panel: rgba(255, 255, 255, 0.86);
+  --shortcut: rgba(255, 255, 255, 0.72);
+  --shortcut-hover: rgba(255, 255, 255, 0.96);
+  --panel-border: rgba(23, 33, 38, 0.1);
+  --line: rgba(23, 33, 38, 0.18);
 }
 @font-face {
   font-family: "Manrope";
@@ -50,7 +72,7 @@ select {
 body {
   min-height: 100vh;
   overflow: hidden;
-  color: var(--white);
+  color: var(--text);
 
   background:
     linear-gradient(180deg, rgba(5, 16, 20, 0.35), rgba(5, 16, 20, 0.78)),
@@ -59,6 +81,11 @@ body {
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
+}
+
+:root[data-theme="light"] body {
+  background: linear-gradient(180deg, rgba(255,255,255,.12), rgba(244,246,247,.2)),
+    url("cachd://assets/Backgrounds/bg1-light.png") center / cover no-repeat;
 }
 
 .home {
@@ -122,7 +149,7 @@ footer {
 }
 
 .date {
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--date);
   margin-top: 12px;
   font-size: 14px;
 }
@@ -131,7 +158,7 @@ footer {
   font-size: 19px;
   font-weight: 400;
   margin: 48px 0 20px;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--hero-text);
 }
 
 .search {
@@ -141,7 +168,7 @@ footer {
   padding: 0 20px;
   gap: 15px;
 
-  background: rgba(5, 16, 20, 0.78);
+  background: var(--panel);
   border: 1px solid rgba(217, 177, 65, 0.35);
   border-radius: 14px;
 
@@ -169,12 +196,13 @@ footer {
   background: transparent;
   border: none;
   outline: none;
-  color: white;
+  color: var(--text);
+  caret-color: var(--text);
   font-size: 15px;
 }
 
 .search input::placeholder {
-  color: rgba(255, 255, 255, 0.48);
+  color: var(--muted);
 }
 
 .search button {
@@ -221,7 +249,7 @@ footer {
 .section-line {
   flex: 1;
   height: 1px;
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--line);
 }
 
 .shortcut-grid {
@@ -238,11 +266,11 @@ footer {
   padding: 15px 5px;
   border-radius: 13px;
   text-decoration: none;
-  color: white;
+  color: var(--text);
   font-size: 12px;
 
-  background: rgba(5, 16, 20, 0.48);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: var(--shortcut);
+  border: 1px solid var(--panel-border);
   backdrop-filter: blur(12px);
 
   transition: 0.2s;
@@ -250,7 +278,7 @@ footer {
 
 .shortcut:hover {
   transform: translateY(-4px);
-  background: rgba(20, 32, 38, 0.85);
+  background: var(--shortcut-hover);
   border-color: rgba(217, 177, 65, 0.4);
 }
 
@@ -266,7 +294,7 @@ footer {
   font-size: 21px;
   font-weight: 700;
 
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--panel-border);
 }
 
 .shortcut-icon img {
@@ -276,7 +304,7 @@ footer {
 }
 
 .github {
-  color: white;
+  color: var(--text);
 }
 
 .youtube {
@@ -354,8 +382,8 @@ option {
   align-items: center;
   justify-content: center;
   color: var(--muted);
-  background: rgba(5, 16, 20, 0.48);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: var(--shortcut);
+  border: 1px solid var(--panel-border);
   border-radius: 10px;
   backdrop-filter: blur(12px);
   transition: color 0.2s, border-color 0.2s, transform 0.2s;

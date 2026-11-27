@@ -240,10 +240,7 @@ public partial class MainWindow : Window
                 $"[Cachd Offline] Load failed: {failedUrl} | Cached: {cachedPage?.Status}"
             );
 
-            var cachedPagesJson = _offlineCacheBridge.GetCachedPagesJson();
-            var encodedCacheJson = Uri.EscapeDataString(cachedPagesJson);
-
-            tab.Browser.Address = $"cachd://offline?url={Uri.EscapeDataString(failedUrl)}&cache={encodedCacheJson}";
+            tab.Browser.Address = $"cachd://offline?url={Uri.EscapeDataString(failedUrl)}";
         });
     }
 
@@ -422,6 +419,7 @@ public partial class MainWindow : Window
 
     private void ApplyRuntimeSettings(CachdSettings settings)
     {
+        ApplyTheme(settings.Theme);
         Strings.Language = settings.Language;
         _currentProfile = CreateResourceProfile(settings);
 
@@ -444,6 +442,105 @@ public partial class MainWindow : Window
         System.Diagnostics.Debug.WriteLine(
             $"[Cachd Settings] Parallel preloads: {_currentProfile.MaxConcurrentPreloads}"
         );
+    }
+
+    private void ApplyTheme(string theme)
+    {
+        var isLight = theme == "light";
+        var palette = isLight
+            ? new Dictionary<string, string>
+            {
+                ["WindowBackgroundBrush"] = "#F4F6F7",
+                ["ToolbarBackgroundBrush"] = "#FFFFFF",
+                ["TabStripBackgroundBrush"] = "#E9EEF0",
+                ["ControlBackgroundBrush"] = "#EDF1F2",
+                ["ControlHoverBrush"] = "#E1E8EB",
+                ["ControlBorderBrush"] = "#D5DEE2",
+                ["SelectedTabBrush"] = "#FFFFFF",
+                ["PanelCardBrush"] = "#F7F9FA",
+                ["PanelCardBorderBrush"] = "#E1E7EA",
+                ["PanelCardHoverBorderBrush"] = "#C29A32",
+                ["PrimaryTextBrush"] = "#172126",
+                ["SecondaryTextBrush"] = "#66747B",
+                ["AccentBrush"] = "#D9B141",
+                ["PrimaryActionTextBrush"] = "#172126"
+            }
+            : new Dictionary<string, string>
+            {
+                ["WindowBackgroundBrush"] = "#051014",
+                ["ToolbarBackgroundBrush"] = "#101A20",
+                ["TabStripBackgroundBrush"] = "#0B151A",
+                ["ControlBackgroundBrush"] = "#202B32",
+                ["ControlHoverBrush"] = "#34434B",
+                ["ControlBorderBrush"] = "#34434B",
+                ["SelectedTabBrush"] = "#26333B",
+                ["PanelCardBrush"] = "#16232A",
+                ["PanelCardBorderBrush"] = "#263840",
+                ["PanelCardHoverBorderBrush"] = "#6C5B32",
+                ["PrimaryTextBrush"] = "#E8E8E8",
+                ["SecondaryTextBrush"] = "#AAB4BA",
+                ["AccentBrush"] = "#D9B141",
+                ["PrimaryActionTextBrush"] = "#051014"
+            };
+
+        foreach (var (key, hexColor) in palette)
+        {
+            Resources[key] = new SolidColorBrush(
+                (Color)ColorConverter.ConvertFromString(hexColor)!);
+        }
+
+        foreach (var tab in _tabs)
+        {
+            if (IsHomePage(tab.CurrentUrl))
+            {
+                var themeName = isLight ? "light" : "dark";
+                tab.Browser.ExecuteScriptAsync(
+                    $"document.documentElement.dataset.theme = '{themeName}';");
+            }
+            else
+            {
+                ApplyUnstyledPageTheme(tab, tab.CurrentUrl, isLight);
+            }
+        }
+    }
+
+    private static void ApplyUnstyledPageTheme(BrowserTab tab, string? url, bool isLight)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || uri.Scheme is not ("http" or "https"))
+            return;
+
+        const string styleId = "cachd-unstyled-dark-theme";
+        var lightThemeScript = $"document.getElementById('{styleId}')?.remove();";
+        var darkThemeScript = $$"""
+            (() => {
+              const styleId = '{{styleId}}';
+              const existing = document.getElementById(styleId);
+              const hasAuthorStyles = [...document.styleSheets].some((sheet) => {
+                try { return sheet.cssRules.length > 0; }
+                catch { return true; }
+              }) || document.querySelector('[style]') !== null;
+
+              if (hasAuthorStyles) {
+                existing?.remove();
+                return;
+              }
+              if (existing || !document.body) return;
+
+              const style = document.createElement('style');
+              style.id = styleId;
+              style.textContent = `
+                :root { color-scheme: dark !important; }
+                html, body { background: #051014 !important; color: #f1f1f1 !important; }
+                body * { color: #f1f1f1 !important; }
+                a, a * { color: #8ab4ff !important; }
+                input, button, select, textarea { background: #101a20 !important; }
+              `;
+              (document.head || document.documentElement).appendChild(style);
+            })();
+            """;
+
+        tab.Browser.ExecuteScriptAsync(isLight ? lightThemeScript : darkThemeScript);
     }
 
     private void OnSettingsChanged(CachdSettings settings)
@@ -481,6 +578,11 @@ public partial class MainWindow : Window
             && uri.Host.Equals("home", StringComparison.OrdinalIgnoreCase);
     }
 
+    private void OpenLinkInNewTab(string url)
+    {
+        Dispatcher.BeginInvoke(new Action(() => AddTab(url)));
+    }
+
     private void AddTab(string? url = null)
     {
         url ??= GetStartupPageUrl();
@@ -489,8 +591,9 @@ public partial class MainWindow : Window
             KeyboardHandler = new BrowserKeyboardHandler()
         };
 
-        var requestHandler = new CachdRequestHandler(OnLoadFailed);
+        var requestHandler = new CachdRequestHandler(OnLoadFailed, OpenLinkInNewTab);
         requestHandler.Attach(browser);
+        browser.LifeSpanHandler = new CachdLifeSpanHandler(OpenLinkInNewTab);
 
         browser.JavascriptObjectRepository.Register("cachdSystem", new CachdSystemBridge());
         browser.JavascriptObjectRepository.Register("cachdOffline", _offlineCacheBridge);
@@ -571,19 +674,45 @@ public partial class MainWindow : Window
                 return;
 
             var loadedUrl = e.Url;
+            var httpStatusCode = e.HttpStatusCode;
+            tab.MarkMainFrameLoadEnded(loadedUrl, httpStatusCode);
 
             await Dispatcher.BeginInvoke(new Action(() =>
             {
+                if (Uri.TryCreate(loadedUrl, UriKind.Absolute, out var loadedUri)
+                    && loadedUri.Scheme is "http" or "https"
+                    && httpStatusCode <= 0)
+                    return;
+
                 RecordNavigation(tab, loadedUrl);
 
                 if (IsHomePage(loadedUrl))
                     UpdateHomePage(tab);
+                else
+                    ApplyUnstyledPageTheme(tab, loadedUrl, App.CurrentSettings.Theme == "light");
             })).Task;
 
         };
 
+        tab.FrameLoadStartHandler = (_, e) =>
+        {
+            if (e.Frame.IsMain)
+                tab.MarkMainFrameLoadStarted(e.Url);
+        };
+
         tab.LoadingStateChangedHandler = (_, e) =>
         {
+            var isLoading = e.IsLoading;
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (GetActiveTab() == tab)
+                {
+                    PageLoadingIndicator.Visibility = isLoading
+                        ? Visibility.Visible
+                        : Visibility.Collapsed;
+                }
+            }));
+
             if (e.IsLoading)
                 return;
 
@@ -593,7 +722,8 @@ public partial class MainWindow : Window
                 if (!_tabs.Contains(tab)
                     || tab.SnapshotSaveInProgress
                     || !Uri.TryCreate(completedUrl, UriKind.Absolute, out var completedUri)
-                    || completedUri.Scheme is not ("http" or "https"))
+                    || completedUri.Scheme is not ("http" or "https")
+                    || !tab.IsSuccessfulMainFrameLoad(completedUri.AbsoluteUri))
                     return;
 
                 tab.SnapshotSaveInProgress = true;
@@ -616,12 +746,13 @@ public partial class MainWindow : Window
                 {
                     tab.SnapshotSaveInProgress = false;
                 }
-            }), DispatcherPriority.Send);
+            }), DispatcherPriority.Normal);
         };
 
         tab.TitleChangedHandler = (_, _) =>
             Dispatcher.BeginInvoke(new Action(() => UpdateTabTitle(tab)));
 
+        browser.FrameLoadStart += tab.FrameLoadStartHandler;
         browser.FrameLoadEnd += tab.FrameLoadHandler;
         browser.LoadingStateChanged += tab.LoadingStateChangedHandler;
         browser.TitleChanged += tab.TitleChangedHandler;
@@ -644,6 +775,7 @@ public partial class MainWindow : Window
             BrowserHost.Content = null;
         }
 
+        tab.Browser.FrameLoadStart -= tab.FrameLoadStartHandler;
         tab.Browser.FrameLoadEnd -= tab.FrameLoadHandler;
         tab.Browser.LoadingStateChanged -= tab.LoadingStateChangedHandler;
         tab.Browser.TitleChanged -= tab.TitleChangedHandler;
@@ -686,6 +818,9 @@ public partial class MainWindow : Window
         AddressBox.Text = IsHomePage(tab.CurrentUrl)
             ? string.Empty
             : tab.CurrentUrl ?? string.Empty;
+        PageLoadingIndicator.Visibility = tab.Browser.IsLoading
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
         UpdateSecurityIcon(tab.CurrentUrl);
 
@@ -776,14 +911,8 @@ public partial class MainWindow : Window
         PredictionsList.ItemsSource = null;
         IntelligenceCount.Text = string.Empty;
 
-        if (
-            !Uri.TryCreate(tab.CurrentUrl, UriKind.Absolute, out var uri)
-            || uri.Scheme is not ("http" or "https")
-        )
-        {
-            SetIntelligenceEmptyState(Strings.Get("pred.open"));
-            return;
-        }
+        var isWebPage = Uri.TryCreate(tab.CurrentUrl, UriKind.Absolute, out var uri)
+            && uri.Scheme is "http" or "https";
         foreach (var item in tab.History)
         {
             System.Diagnostics.Debug.WriteLine(
@@ -800,16 +929,23 @@ public partial class MainWindow : Window
                 $"[Cachd Debug] History item: {item.PreviousUrl} -> {item.Url}"
             );
         }
-        var predictions = _transitionPredictor.Predict(tab.History, tab.CurrentUrl, 5);
-
-        if (predictions.Count == 0)
+        IReadOnlyList<PagePrediction> predictions;
+        if (isWebPage)
         {
-            predictions = _baselinePredictor.Predict(tab.History, tab.CurrentUrl, 5);
+            predictions = _transitionPredictor.Predict(tab.History, tab.CurrentUrl!, 5);
+            if (predictions.Count == 0)
+                predictions = _baselinePredictor.Predict(tab.History, tab.CurrentUrl!, 5);
+        }
+        else
+        {
+            predictions = GetMostVisitedHostPredictions(tab.History);
         }
 
         if (predictions.Count == 0)
         {
-            SetIntelligenceEmptyState(Strings.Get("pred.few"));
+            SetIntelligenceEmptyState(tab.History.Count == 0
+                ? Strings.Get("pred.open")
+                : Strings.Get("pred.few"));
         }
         else
         {
@@ -824,10 +960,10 @@ public partial class MainWindow : Window
         System.Diagnostics.Debug.WriteLine($"[Cachd Debug] Predictions count: {predictions.Count}");
 
         ////// ТЕСТИ //////
-        if (_preloadExecutor is not null)
+        if (isWebPage && _preloadExecutor is not null)
         {
             var candidate = _preloadingManager.SelectCandidate(
-                tab.CurrentUrl,
+                tab.CurrentUrl!,
                 predictions,
                 _cacheManager
             );
@@ -852,6 +988,28 @@ public partial class MainWindow : Window
                 $"[Cachd Debug] Prediction: {prediction.Url} | Score: {prediction.Score}"
             );
         }
+    }
+
+    private static IReadOnlyList<PagePrediction> GetMostVisitedHostPredictions(
+        IReadOnlyList<NavigationEvent> history)
+    {
+        return history
+            .Where(item => Uri.TryCreate(item.Url, UriKind.Absolute, out var pageUri)
+                && pageUri.Scheme is "http" or "https")
+            .GroupBy(item =>
+            {
+                var host = new Uri(item.Url).Host;
+                return host.StartsWith("www.", StringComparison.OrdinalIgnoreCase)
+                    ? host[4..]
+                    : host;
+            }, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new PagePrediction(
+                group.OrderByDescending(item => item.VisitedAt).First().Url,
+                group.Count()))
+            .OrderByDescending(prediction => prediction.Score)
+            .ThenBy(prediction => prediction.Url, StringComparer.OrdinalIgnoreCase)
+            .Take(5)
+            .ToArray();
     }
 
     private void CheckRequestContext()
@@ -1139,6 +1297,7 @@ public partial class MainWindow : Window
 
         foreach (var tab in _tabs)
         {
+            tab.Browser.FrameLoadStart -= tab.FrameLoadStartHandler;
             tab.Browser.FrameLoadEnd -= tab.FrameLoadHandler;
             tab.Browser.LoadingStateChanged -= tab.LoadingStateChangedHandler;
             tab.Browser.TitleChanged -= tab.TitleChangedHandler;
@@ -1165,11 +1324,36 @@ public partial class MainWindow : Window
 
         public string? CurrentUrl { get; set; }
 
+        private string? _lastMainFrameUrl;
+        private int _lastMainFrameHttpStatusCode;
+
+        public EventHandler<FrameLoadStartEventArgs> FrameLoadStartHandler { get; set; } = null!;
         public EventHandler<FrameLoadEndEventArgs> FrameLoadHandler { get; set; } = null!;
         public EventHandler<LoadingStateChangedEventArgs> LoadingStateChangedHandler { get; set; } = null!;
         public bool SnapshotSaveInProgress { get; set; }
 
         public DependencyPropertyChangedEventHandler TitleChangedHandler { get; set; } = null!;
+
+        public void MarkMainFrameLoadStarted(string url)
+        {
+            Volatile.Write(ref _lastMainFrameHttpStatusCode, 0);
+            Volatile.Write(ref _lastMainFrameUrl, url);
+        }
+
+        public void MarkMainFrameLoadEnded(string url, int httpStatusCode)
+        {
+            Volatile.Write(ref _lastMainFrameUrl, url);
+            Volatile.Write(ref _lastMainFrameHttpStatusCode, httpStatusCode);
+        }
+
+        public bool IsSuccessfulMainFrameLoad(string url)
+        {
+            return string.Equals(
+                    Volatile.Read(ref _lastMainFrameUrl),
+                    url,
+                    StringComparison.OrdinalIgnoreCase)
+                && Volatile.Read(ref _lastMainFrameHttpStatusCode) is >= 200 and < 400;
+        }
 
         public BrowserTab(CefBrowser browser, TabItem item, TextBlock titleText)
         {

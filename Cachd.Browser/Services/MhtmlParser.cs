@@ -22,7 +22,21 @@ public static class MhtmlParser
             var boundary = boundaryMatch.Groups[1].Value;
             var parts = content.Split($"--{boundary}");
 
-            string htmlContent = null;
+            var snapshotLocationMatch = Regex.Match(
+                content,
+                @"(?im)^Snapshot-Content-Location:\s*(?<url>[^\r\n]+)");
+            var snapshotUrl = snapshotLocationMatch.Success
+                ? snapshotLocationMatch.Groups["url"].Value.Trim()
+                : null;
+            var snapshotStartMatch = Regex.Match(
+                content,
+                @"(?im)^\s*start\s*=\s*<(?<id>[^>]+)>");
+            var snapshotContentId = snapshotStartMatch.Success
+                ? snapshotStartMatch.Groups["id"].Value.Trim()
+                : null;
+
+            string? htmlContent = null;
+            var selectedMainDocument = false;
             var resources = new Dictionary<string, string>();
 
             foreach (var part in parts)
@@ -36,23 +50,24 @@ public static class MhtmlParser
                 var headers = part.Substring(0, headerEnd);
                 var body = part.Substring(headerEnd + (part.IndexOf("\r\n\r\n") != -1 ? 4 : 2));
 
-                var contentTypeMatch = Regex.Match(headers, @"Content-Type:\s*([^\r\n;]+)", RegexOptions.IgnoreCase);
+                var contentTypeMatch = Regex.Match(headers, @"Content-Type:\s*([^\r\n]+)", RegexOptions.IgnoreCase);
                 var contentLocationMatch = Regex.Match(headers, @"Content-Location:\s*([^\r\n]+)", RegexOptions.IgnoreCase);
                 var contentIdMatch = Regex.Match(headers, @"Content-ID:\s*<([^>]+)>", RegexOptions.IgnoreCase);
                 var contentTransferEncodingMatch = Regex.Match(headers, @"Content-Transfer-Encoding:\s*([^\r\n]+)", RegexOptions.IgnoreCase);
 
                 var contentType = contentTypeMatch.Success ? contentTypeMatch.Groups[1].Value.Trim() : "";
+                var textEncoding = GetTextEncoding(headers);
                 var contentLocation = contentLocationMatch.Success ? contentLocationMatch.Groups[1].Value.Trim() : "";
                 var contentId = contentIdMatch.Success ? contentIdMatch.Groups[1].Value.Trim() : "";
                 var encoding = contentTransferEncodingMatch.Success ? contentTransferEncodingMatch.Groups[1].Value.Trim() : "";
 
-                byte[] resourceBytes = null;
+                byte[] resourceBytes;
                 if (encoding.Equals("base64", StringComparison.OrdinalIgnoreCase))
                 {
                     try
                     {
                         resourceBytes = Convert.FromBase64String(body.Trim());
-                        body = Encoding.UTF8.GetString(resourceBytes);
+                        body = textEncoding.GetString(resourceBytes);
                     }
                     catch
                     {
@@ -61,28 +76,42 @@ public static class MhtmlParser
                 }
                 else if (encoding.Equals("quoted-printable", StringComparison.OrdinalIgnoreCase))
                 {
-                    body = DecodeQuotedPrintable(body);
-                    resourceBytes = Encoding.UTF8.GetBytes(body);
+                    resourceBytes = DecodeQuotedPrintableBytes(body);
+                    body = textEncoding.GetString(resourceBytes);
                 }
                 else
                 {
                     resourceBytes = Encoding.UTF8.GetBytes(body);
+                    body = textEncoding.GetString(resourceBytes);
                 }
 
                 if (contentType.Contains("text/html", StringComparison.OrdinalIgnoreCase))
                 {
-                    htmlContent = body;
-                    if (encoding.Equals("quoted-printable", StringComparison.OrdinalIgnoreCase))
+                    var matchesSnapshotLocation = !string.IsNullOrEmpty(snapshotUrl)
+                        && Uri.TryCreate(snapshotUrl, UriKind.Absolute, out var snapshotUri)
+                        && Uri.TryCreate(contentLocation, UriKind.Absolute, out var partUri)
+                        && Uri.Compare(snapshotUri, partUri, UriComponents.HttpRequestUrl,
+                            UriFormat.SafeUnescaped, StringComparison.OrdinalIgnoreCase) == 0;
+                    var matchesSnapshotContentId = !string.IsNullOrEmpty(snapshotContentId)
+                        && string.Equals(contentId, snapshotContentId, StringComparison.OrdinalIgnoreCase);
+
+                    if (matchesSnapshotLocation || matchesSnapshotContentId)
                     {
-                        htmlContent = DecodeQuotedPrintable(htmlContent);
-                        System.Diagnostics.Debug.WriteLine("[Cachd MHTML] Decoded HTML from quoted-printable");
+                        htmlContent = body;
+                        selectedMainDocument = true;
                     }
-                    System.Diagnostics.Debug.WriteLine($"[Cachd MHTML] Found HTML content, length: {body.Length}");
+                    else if (!selectedMainDocument && htmlContent is null)
+                    {
+                        htmlContent = body;
+                    }
+
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[Cachd MHTML] HTML part: {contentLocation} | Main document: {matchesSnapshotLocation || matchesSnapshotContentId} | Length: {body.Length}");
                 }
                 else if (!string.IsNullOrEmpty(contentLocation) || !string.IsNullOrEmpty(contentId))
                 {
                     var mimeType = GetMimeTypeFromContentType(contentType);
-                    var dataUri = $"data:{mimeType};base64,{Convert.ToBase64String(resourceBytes ?? Encoding.UTF8.GetBytes(body))}";
+                    var dataUri = $"data:{mimeType};base64,{Convert.ToBase64String(resourceBytes)}";
                     
                     System.Diagnostics.Debug.WriteLine($"[Cachd MHTML] Resource: {contentLocation ?? contentId} | Type: {mimeType} | Size: {(resourceBytes?.Length ?? body.Length)} bytes");
                     
@@ -166,34 +195,71 @@ public static class MhtmlParser
         }
     }
 
-    private static string DecodeQuotedPrintable(string input)
+    private static Encoding GetTextEncoding(string headers)
     {
-        var result = new StringBuilder();
+        var charsetMatch = Regex.Match(
+            headers,
+            @"charset\s*=\s*(?:""([^""]+)""|'([^']+)'|([^;\s]+))",
+            RegexOptions.IgnoreCase);
+        var charset = charsetMatch.Groups[1].Success
+            ? charsetMatch.Groups[1].Value
+            : charsetMatch.Groups[2].Success
+                ? charsetMatch.Groups[2].Value
+                : charsetMatch.Groups[3].Value;
+
+        if (string.IsNullOrWhiteSpace(charset))
+            return Encoding.UTF8;
+
+        try
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            return Encoding.GetEncoding(charset.Trim());
+        }
+        catch
+        {
+            return Encoding.UTF8;
+        }
+    }
+
+    private static byte[] DecodeQuotedPrintableBytes(string input)
+    {
+        using var output = new MemoryStream(input.Length);
         for (int i = 0; i < input.Length; i++)
         {
+            if (input[i] == '=' && i + 2 < input.Length
+                && input[i + 1] == '\r' && input[i + 2] == '\n')
+            {
+                i += 2;
+                continue;
+            }
+
+            if (input[i] == '=' && i + 1 < input.Length && input[i + 1] == '\n')
+            {
+                i++;
+                continue;
+            }
+
             if (input[i] == '=' && i + 2 < input.Length)
             {
                 var hex = input.Substring(i + 1, 2);
                 if (int.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out var value))
                 {
-                    result.Append((char)value);
+                    output.WriteByte((byte)value);
                     i += 2;
                 }
                 else
                 {
-                    result.Append(input[i]);
+                    output.WriteByte((byte)'=');
                 }
-            }
-            else if (input[i] == '=' && i + 1 < input.Length && input[i + 1] == '\n')
-            {
-                i += 1;
             }
             else
             {
-                result.Append(input[i]);
+                var literalBytes = Encoding.UTF8.GetBytes(input.Substring(i, 1));
+                output.Write(literalBytes, 0, literalBytes.Length);
             }
         }
-        return result.ToString();
+
+        return output.ToArray();
     }
 
     private static string GetMimeTypeFromContentType(string contentType)

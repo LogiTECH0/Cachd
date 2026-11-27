@@ -194,9 +194,9 @@
         .cached-page-url {
             font-size: 11px;
             color: #AAB4BA;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            white-space: normal;
+            overflow-wrap: anywhere;
+            line-height: 1.45;
         }
 
         .cached-page-meta {
@@ -263,18 +263,16 @@
             }
         });
 
-        const cacheParam = params.get("cache");
-        console.log("Cache param:", cacheParam);
-        if (cacheParam) {
+        async function loadCachedPages() {
             try {
-                const pages = JSON.parse(decodeURIComponent(cacheParam));
-                console.log("Parsed pages:", pages);
+                await CefSharp.BindObjectAsync("cachdOffline");
+                const pagesJson = await cachdOffline.getCachedPagesJson();
+                const pages = JSON.parse(pagesJson || "[]");
 
                 if (pages && pages.length > 0) {
                     cachedPages.style.display = "block";
 
                     pages.forEach(page => {
-                        console.log("Creating page item:", page);
                         const item = document.createElement("a");
                         item.className = "cached-page-item";
                         item.style.cursor = "pointer";
@@ -296,6 +294,8 @@
                 console.error("Failed to load cached pages:", e);
             }
         }
+
+        loadCachedPages();
     </script>
 </body>
 

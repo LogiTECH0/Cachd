@@ -9,8 +9,8 @@
         MinHeight="550"
         WindowStyle="None"
         ResizeMode="CanResize"
-        Background="#051014"
-        Foreground="#E8E8E8"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource PrimaryTextBrush}"
         PreviewKeyDown="Window_PreviewKeyDown"
         FontFamily="{StaticResource AppFont}">
 
@@ -18,11 +18,27 @@
         <shell:WindowChrome
             CaptionHeight="44"
             ResizeBorderThickness="6"
+            CornerRadius="10"
             GlassFrameThickness="0"
             UseAeroCaptionButtons="False"/>
     </shell:WindowChrome.WindowChrome>
 
     <Window.Resources>
+
+        <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#051014"/>
+        <SolidColorBrush x:Key="ToolbarBackgroundBrush" Color="#101A20"/>
+        <SolidColorBrush x:Key="TabStripBackgroundBrush" Color="#0B151A"/>
+        <SolidColorBrush x:Key="ControlBackgroundBrush" Color="#202B32"/>
+        <SolidColorBrush x:Key="ControlHoverBrush" Color="#34434B"/>
+        <SolidColorBrush x:Key="ControlBorderBrush" Color="#34434B"/>
+        <SolidColorBrush x:Key="SelectedTabBrush" Color="#26333B"/>
+        <SolidColorBrush x:Key="PanelCardBrush" Color="#16232A"/>
+        <SolidColorBrush x:Key="PanelCardBorderBrush" Color="#263840"/>
+        <SolidColorBrush x:Key="PanelCardHoverBorderBrush" Color="#6C5B32"/>
+        <SolidColorBrush x:Key="PrimaryTextBrush" Color="#E8E8E8"/>
+        <SolidColorBrush x:Key="SecondaryTextBrush" Color="#AAB4BA"/>
+        <SolidColorBrush x:Key="AccentBrush" Color="#D9B141"/>
+        <SolidColorBrush x:Key="PrimaryActionTextBrush" Color="#051014"/>
 
         <Style x:Key="TrafficButton"
                TargetType="Button">
@@ -58,9 +74,9 @@
             <Setter Property="Margin"
                     Value="2,0"/>
             <Setter Property="Background"
-                    Value="#202B32"/>
+                    Value="{DynamicResource ControlBackgroundBrush}"/>
             <Setter Property="Foreground"
-                    Value="#E8E8E8"/>
+                    Value="{DynamicResource PrimaryTextBrush}"/>
             <Setter Property="BorderThickness"
                     Value="0"/>
             <Setter Property="FontSize"
@@ -83,16 +99,42 @@
                 <Trigger Property="IsMouseOver"
                          Value="True">
                     <Setter Property="Background"
-                            Value="#34434B"/>
+                            Value="{DynamicResource ControlHoverBrush}"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
 
+        <Style x:Key="RoundedToolbarButton" TargetType="Button">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="10">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.9"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.75"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style TargetType="{x:Type TabItem}">
             <Setter Property="Foreground"
-                    Value="#AAB4BA"/>
+                    Value="{DynamicResource SecondaryTextBrush}"/>
             <Setter Property="Background"
-                    Value="#101A20"/>
+                    Value="{DynamicResource ToolbarBackgroundBrush}"/>
             <Setter Property="Padding"
                     Value="12,7"/>
             <Setter Property="Margin"
@@ -115,15 +157,15 @@
                                      Value="True">
                                 <Setter TargetName="TabBackground"
                                         Property="Background"
-                                        Value="#26333B"/>
+                                        Value="{DynamicResource SelectedTabBrush}"/>
                                 <Setter Property="Foreground"
-                                        Value="#D9B141"/>
+                                        Value="{DynamicResource AccentBrush}"/>
                             </Trigger>
                             <Trigger Property="IsMouseOver"
                                      Value="True">
                                 <Setter TargetName="TabBackground"
                                         Property="Background"
-                                        Value="#202B32"/>
+                                        Value="{DynamicResource ControlBackgroundBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -133,7 +175,8 @@
 
     </Window.Resources>
 
-    <Border Background="#051014">
+    <Border Background="{DynamicResource WindowBackgroundBrush}"
+            CornerRadius="10">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="44"/>
@@ -144,7 +187,7 @@
             </Grid.RowDefinitions>
 
             <Border Grid.Row="0"
-                    Background="#101A20"
+                    Background="{DynamicResource ToolbarBackgroundBrush}"
                     Padding="15,0">
 
                 <Grid>
@@ -192,17 +235,18 @@
                                Text="cachd"
                                FontSize="17"
                                FontWeight="Bold"
-                               Foreground="#D9B141"
+                               Foreground="{DynamicResource AccentBrush}"
                                HorizontalAlignment="Center"
                                VerticalAlignment="Center"/>
 
                     <Button Grid.Column="2"
                             x:Name="IntelligenceToggleButton"
+                            Style="{StaticResource RoundedToolbarButton}"
                             Content="✦"
                             Width="34"
                             Height="30"
-                            Background="#202B32"
-                            Foreground="#D9B141"
+                            Background="{DynamicResource ControlBackgroundBrush}"
+                            Foreground="{DynamicResource AccentBrush}"
                             BorderThickness="0"
                             FontSize="19"
                             Cursor="Hand"
@@ -214,15 +258,17 @@
             </Border>
 
             <DockPanel Grid.Row="1"
-                       Background="#0B151A"
+                       Background="{DynamicResource TabStripBackgroundBrush}"
                        LastChildFill="True">
 
                 <Button DockPanel.Dock="Right"
+                        x:Name="NewTabButton"
+                        Style="{StaticResource RoundedToolbarButton}"
                         Content="+"
                         Width="36"
                         Margin="4,3,8,3"
-                        Background="#202B32"
-                        Foreground="#D9B141"
+                        Background="{DynamicResource ControlBackgroundBrush}"
+                        Foreground="{DynamicResource AccentBrush}"
                         BorderThickness="0"
                         FontSize="20"
                         Cursor="Hand"
@@ -247,7 +293,7 @@
             </DockPanel>
 
             <Border Grid.Row="2"
-                    Background="#101A20"
+                    Background="{DynamicResource ToolbarBackgroundBrush}"
                     Padding="12,8">
 
                 <Grid>
@@ -276,9 +322,9 @@
                     </StackPanel>
 
                     <Border Grid.Column="1"
-                            Background="#202B32"
+                            Background="{DynamicResource ControlBackgroundBrush}"
                             CornerRadius="11"
-                            BorderBrush="#34434B"
+                            BorderBrush="{DynamicResource ControlBorderBrush}"
                             BorderThickness="1">
 
                         <Grid>
@@ -297,26 +343,39 @@
                             <TextBox x:Name="AddressBox"
                                      Grid.Column="1"
                                      Background="Transparent"
-                                     Foreground="#E8E8E8"
+                                     Foreground="{DynamicResource PrimaryTextBrush}"
+                                     CaretBrush="{DynamicResource PrimaryTextBrush}"
                                      BorderThickness="0"
                                      FontSize="13"
                                      Padding="4,7"
                                      VerticalContentAlignment="Center"
                                      KeyDown="AddressBox_KeyDown"/>
 
+                            <ProgressBar x:Name="PageLoadingIndicator"
+                                         Grid.Column="1"
+                                         Height="2"
+                                         Margin="4,0,8,1"
+                                         VerticalAlignment="Bottom"
+                                         IsIndeterminate="True"
+                                         Foreground="{DynamicResource AccentBrush}"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Visibility="Collapsed"/>
+
                         </Grid>
                     </Border>
                     <Button Grid.Column="2"
                             x:Name="OfflineModeToggleButton"
+                            Style="{StaticResource RoundedToolbarButton}"
                             Content="Offline: OFF"
                             MinWidth="105"
                             Height="36"
                             Margin="10,0,0,0"
                             Padding="10,0"
-                            Background="#202B32"
-                            Foreground="#AAB4BA"
+                            Background="{DynamicResource ControlBackgroundBrush}"
+                            Foreground="{DynamicResource SecondaryTextBrush}"
                             BorderThickness="1"
-                            BorderBrush="#34434B"
+                            BorderBrush="{DynamicResource ControlBorderBrush}"
                             FontWeight="SemiBold"
                             Cursor="Hand"
                             Click="OfflineModeToggle_Click"/>
@@ -327,7 +386,7 @@
                             Height="36"
                             Margin="10,0,0,0"
                             Background="#D9B141"
-                            Foreground="#051014"
+                            Foreground="{DynamicResource PrimaryActionTextBrush}"
                             BorderThickness="0"
                             FontWeight="SemiBold"
                             Cursor="Hand"
@@ -365,7 +424,7 @@
             <Grid Grid.Row="3"
                   ClipToBounds="True">
 
-                <Border Background="#051014"
+                <Border Background="{DynamicResource WindowBackgroundBrush}"
                         ClipToBounds="True">
 
                     <ContentControl x:Name="BrowserHost"/>
@@ -379,8 +438,8 @@
                         VerticalAlignment="Stretch"
                         Width="360"
                         Margin="12"
-                        Background="#101A20"
-                        BorderBrush="#34434B"
+                        Background="{DynamicResource ToolbarBackgroundBrush}"
+                        BorderBrush="{DynamicResource ControlBorderBrush}"
                         BorderThickness="1"
                         CornerRadius="16"
                         Padding="18">
@@ -410,12 +469,12 @@
                             <Border Width="40"
                                     Height="40"
                                     CornerRadius="12"
-                                    Background="#202B32"
-                                    BorderBrush="#34434B"
+                                    Background="{DynamicResource ControlBackgroundBrush}"
+                                    BorderBrush="{DynamicResource ControlBorderBrush}"
                                     BorderThickness="1">
                                 <TextBlock Text="✦"
                                            FontSize="21"
-                                           Foreground="#D9B141"
+                                           Foreground="{DynamicResource AccentBrush}"
                                            HorizontalAlignment="Center"
                                            VerticalAlignment="Center"/>
                             </Border>
@@ -427,12 +486,12 @@
                                            Text="Your suggestions"
                                            FontSize="16"
                                            FontWeight="SemiBold"
-                                           Foreground="#E8E8E8"/>
+                                           Foreground="{DynamicResource PrimaryTextBrush}"/>
                                 <TextBlock x:Name="IntelligenceSubtitle"
                                            Text="Pages you may want to visit next"
                                            Margin="0,3,0,0"
                                            FontSize="11"
-                                           Foreground="#AAB4BA"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
                                            TextWrapping="Wrap"/>
                             </StackPanel>
 
@@ -441,9 +500,9 @@
                                     Content="×"
                                     Width="30"
                                     Height="30"
-                                    Background="#202B32"
-                                    Foreground="#AAB4BA"
-                                    BorderBrush="#34434B"
+                                    Background="{DynamicResource ControlBackgroundBrush}"
+                                    Foreground="{DynamicResource SecondaryTextBrush}"
+                                    BorderBrush="{DynamicResource ControlBorderBrush}"
                                     BorderThickness="1"
                                     FontSize="18"
                                     Cursor="Hand"
@@ -462,25 +521,25 @@
                                        Text="UP NEXT"
                                        FontSize="10"
                                        FontWeight="SemiBold"
-                                       Foreground="#AAB4BA"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
                                        VerticalAlignment="Center"/>
                             <Border Grid.Column="1"
                                     Height="1"
                                     Margin="12,0"
-                                    Background="#34434B"
+                                    Background="{DynamicResource ControlBorderBrush}"
                                     VerticalAlignment="Center"/>
                             <TextBlock x:Name="IntelligenceCount"
                                        Grid.Column="2"
                                        Text=""
                                        FontSize="11"
-                                       Foreground="#AAB4BA"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
                                        VerticalAlignment="Center"/>
                         </Grid>
 
                         <ListBox x:Name="PredictionsList"
                                  Grid.Row="2"
                                  Background="Transparent"
-                                 Foreground="#E8E8E8"
+                                 Foreground="{DynamicResource PrimaryTextBrush}"
                                  BorderThickness="0"
                                  Padding="0"
                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -498,19 +557,19 @@
                                                 <Border x:Name="SuggestionCard"
                                                         Margin="0,0,0,8"
                                                         Padding="12"
-                                                        Background="#16232A"
-                                                        BorderBrush="#263840"
+                                                        Background="{DynamicResource PanelCardBrush}"
+                                                        BorderBrush="{DynamicResource PanelCardBorderBrush}"
                                                         BorderThickness="1"
                                                         CornerRadius="11">
                                                     <ContentPresenter/>
                                                 </Border>
                                                 <ControlTemplate.Triggers>
                                                     <Trigger Property="IsMouseOver" Value="True">
-                                                        <Setter TargetName="SuggestionCard" Property="Background" Value="#202B32"/>
-                                                        <Setter TargetName="SuggestionCard" Property="BorderBrush" Value="#6C5B32"/>
+                                                        <Setter TargetName="SuggestionCard" Property="Background" Value="{DynamicResource ControlBackgroundBrush}"/>
+                                                        <Setter TargetName="SuggestionCard" Property="BorderBrush" Value="{DynamicResource PanelCardHoverBorderBrush}"/>
                                                     </Trigger>
                                                     <Trigger Property="IsSelected" Value="True">
-                                                        <Setter TargetName="SuggestionCard" Property="BorderBrush" Value="#D9B141"/>
+                                                        <Setter TargetName="SuggestionCard" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
                                                     </Trigger>
                                                 </ControlTemplate.Triggers>
                                             </ControlTemplate>
@@ -529,11 +588,11 @@
                                         <Border Width="30"
                                                 Height="30"
                                                 CornerRadius="9"
-                                                Background="#202B32"
+                                                Background="{DynamicResource ControlBackgroundBrush}"
                                                 VerticalAlignment="Center">
                                             <TextBlock Text="↗"
                                                        FontSize="15"
-                                                       Foreground="#D9B141"
+                                                       Foreground="{DynamicResource AccentBrush}"
                                                        HorizontalAlignment="Center"
                                                        VerticalAlignment="Center"/>
                                         </Border>
@@ -543,19 +602,19 @@
                                             <TextBlock Text="{Binding Title}"
                                                        FontSize="13"
                                                        FontWeight="SemiBold"
-                                                       Foreground="#E8E8E8"
+                                                       Foreground="{DynamicResource PrimaryTextBrush}"
                                                        TextTrimming="CharacterEllipsis"/>
                                             <TextBlock Text="{Binding Detail}"
                                                        Margin="0,3,0,0"
                                                        FontSize="11"
-                                                       Foreground="#AAB4BA"
+                                                       Foreground="{DynamicResource SecondaryTextBrush}"
                                                        TextTrimming="CharacterEllipsis"/>
                                         </StackPanel>
                                         <TextBlock Grid.Column="2"
                                                    Text="›"
                                                    Margin="8,0,2,0"
                                                    FontSize="22"
-                                                   Foreground="#AAB4BA"
+                                                   Foreground="{DynamicResource SecondaryTextBrush}"
                                                    VerticalAlignment="Center"/>
                                     </Grid>
                                 </DataTemplate>
@@ -568,7 +627,7 @@
                                    Margin="8,28"
                                    FontSize="13"
                                    LineHeight="21"
-                                   Foreground="#AAB4BA"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
                                    TextAlignment="Center"
                                    TextWrapping="Wrap"
                                    VerticalAlignment="Center"/>
@@ -576,14 +635,14 @@
                         <Border Grid.Row="3"
                                 Margin="0,10,0,0"
                                 Padding="11,10"
-                                Background="#16232A"
-                                BorderBrush="#263840"
+                                Background="{DynamicResource PanelCardBrush}"
+                                BorderBrush="{DynamicResource PanelCardBorderBrush}"
                                 BorderThickness="1"
                                 CornerRadius="10">
                             <TextBlock x:Name="IntelligenceTip"
                                        Text="Suggestions improve as you browse."
                                        FontSize="11"
-                                       Foreground="#AAB4BA"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
                                        TextWrapping="Wrap"/>
                         </Border>
                     </Grid>

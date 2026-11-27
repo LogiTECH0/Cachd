@@ -111,6 +111,9 @@ public sealed class SettingsStore
             settings.StartupPage is "home" or "blank"
                 ? settings.StartupPage
                 : "home";
+        settings.Theme = settings.Theme is "light" or "dark"
+            ? settings.Theme
+            : "dark";
         settings.CacheBudgetMb = Math.Clamp(
             settings.CacheBudgetMb, 100, 1000);
 

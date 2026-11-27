@@ -5,6 +5,7 @@ const memorySaver = document.getElementById("memorySaver");
 const cacheBudget = document.getElementById("cacheBudget");
 const parallelPreloads = document.getElementById("parallelPreloads");
 const startupPage = document.getElementById("startupPage");
+const theme = document.getElementById("theme");
 const customNote = document.getElementById("customNote");
 
 const presets = {
@@ -35,6 +36,7 @@ const defaultSettings = {
   ...presets.balanced,
   manualOverride: false,
   startupPage: "home",
+  theme: "dark",
 };
 
 let settings = { ...defaultSettings };
@@ -49,6 +51,7 @@ function fromBridgeSettings(data) {
     parallelPreloads: data.maxConcurrentPreloads ?? 2,
     manualOverride: data.manualOverride ?? false,
     startupPage: data.startupPage ?? "home",
+    theme: data.theme ?? "dark",
   };
 }
 
@@ -61,6 +64,7 @@ function toBridgeSettings() {
     maxConcurrentPreloads: settings.parallelPreloads,
     manualOverride: settings.manualOverride,
     startupPage: settings.startupPage,
+    theme: settings.theme,
   };
 }
 
@@ -88,6 +92,8 @@ function renderSettings() {
   cacheBudget.value = String(settings.cacheBudget);
   parallelPreloads.value = String(settings.parallelPreloads);
   startupPage.value = settings.startupPage;
+  theme.value = settings.theme;
+  document.documentElement.dataset.theme = settings.theme;
 
   modeCards.forEach((card) => {
     card.classList.toggle("selected", card.dataset.mode === settings.mode);
@@ -162,6 +168,12 @@ async function updateStartupPage() {
   console.log(`[Cachd Settings] Startup page: ${settings.startupPage}`);
 }
 
+async function updateTheme() {
+  settings.theme = theme.value;
+  renderSettings();
+  await saveSettings();
+}
+
 modeCards.forEach((card) => {
   card.addEventListener("click", () => {
     setMode(card.dataset.mode);
@@ -173,6 +185,7 @@ modeCards.forEach((card) => {
 });
 
 startupPage.addEventListener("change", updateStartupPage);
+theme.addEventListener("change", updateTheme);
 
 const systemRam = document.getElementById("systemRam");
 const systemRecommended = document.getElementById("systemRecommended");
